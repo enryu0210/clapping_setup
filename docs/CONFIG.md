@@ -19,12 +19,54 @@ copy config\apps.example.yaml config\apps.yaml
 
 ## 1. 전체 구조
 
-파일은 크게 두 덩어리입니다.
+파일은 크게 세 덩어리입니다.
 
 ```yaml
+audio:       # 어떤 마이크를 쓸지
 detection:   # 박수를 얼마나 예민하게 감지할지
 apps:        # 박수 치면 무엇을 실행할지
 ```
+
+---
+
+## 1-1. `audio` — 쓸 마이크 고르기
+
+```yaml
+audio:
+  device:            # 비워두면 Windows 기본 입력 장치
+```
+
+대부분은 비워둬도 됩니다. 하지만 **박수를 쳐도 아무 반응이 없다면 십중팔구 여기가 원인**입니다.
+
+> ⚠️ **가장 흔한 함정**: 오디오 인터페이스나 Elgato Wave Link, 가상 오디오 케이블 같은
+> 프로그램이 깔려 있으면 Windows 기본 입력 장치가 **실제 마이크가 아니라 가상 장치**로
+> 잡혀 있는 경우가 많습니다. 그 프로그램이 꺼져 있으면 무음만 들어옵니다.
+
+**확인 순서:**
+
+```powershell
+# 1. 어떤 장치들이 있는지 본다
+python -m clap_launcher --list-devices
+
+# 2. 지금 쓰는 장치가 실제로 소리를 받는지 본다 (박수 치면 막대가 튀어야 정상)
+python -m clap_launcher --level
+
+# 3. 안 튀면 다른 장치를 지정해서 다시 확인
+python -m clap_launcher --level --device 3
+python -m clap_launcher --level --device Logitech    # 이름 일부로도 됩니다
+```
+
+잘 되는 장치를 찾았으면 `apps.yaml`에 적어둡니다.
+
+```yaml
+audio:
+  device: 3            # 번호로 지정
+  # device: "Logitech" # 이름 일부로 지정 — USB를 다시 꽂아 번호가 바뀌어도 안전합니다
+```
+
+> 💡 같은 마이크가 목록에 여러 번 보이는 것은 정상입니다. Windows가 드라이버 방식
+> (MME / DirectSound / WASAPI)별로 하나씩 보여주기 때문입니다. 아무거나 골라도 되지만,
+> 잘 안 되면 같은 이름의 다른 방식을 시도해 보세요.
 
 ---
 

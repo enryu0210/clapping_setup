@@ -22,6 +22,19 @@ class DetectionConfig:
 
 
 @dataclass
+class AudioConfig:
+    """마이크 선택.
+
+    왜 설정으로 빼는가 (M1에서 실제로 겪은 문제):
+    PC에 오디오 인터페이스나 Elgato Wave Link 같은 가상 장치가 깔려 있으면
+    Windows 기본 입력 장치가 '가상 장치'로 잡힌다. 그 앱이 꺼져 있으면 무음만 들어와서
+    "박수를 쳐도 반응이 없다"가 된다. 사용자가 직접 고를 수 있어야 한다.
+    """
+
+    device: int | str | None = None   # 장치 번호 또는 이름 일부. None이면 Windows 기본값
+
+
+@dataclass
 class AppEntry:
     """박수 감지 시 실행할 대상 하나."""
 
@@ -37,6 +50,7 @@ class AppEntry:
 class Config:
     detection: DetectionConfig
     apps: list[AppEntry]
+    audio: AudioConfig = field(default_factory=AudioConfig)
 
 
 class ConfigError(Exception):

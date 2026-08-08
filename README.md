@@ -34,6 +34,21 @@ copy config\apps.example.yaml config\apps.yaml
 python -m clap_launcher
 ```
 
+### 지금 해볼 수 있는 것 (M1 완료)
+
+```powershell
+python -m clap_launcher --list-devices   # 마이크 목록 보기
+python -m clap_launcher --level          # 실시간 음량 미터 — 박수 치면 막대가 튑니다
+python -m clap_launcher --level --device 3   # 다른 마이크로 확인
+```
+
+```
+🎤 입력 장치: [3] Mic In(Elgato Wave:1) (16000Hz, 모노, 160샘플/조각)
+[█████████████████·······················]   -35.1 dBFS  최고  -35.1
+```
+
+박수를 쳐도 막대가 안 움직이면 마이크 선택 문제입니다 → [docs/CONFIG.md](docs/CONFIG.md#1-1-audio--쓸-마이크-고르기)
+
 > ⚠️ `config/apps.yaml`은 **기기마다 프로그램 설치 경로가 다르므로 git에 올리지 않습니다.**
 > 다른 PC에서 쓸 때는 `apps.example.yaml`을 다시 복사해서 그 기기에 맞게 경로를 채워야 합니다.
 
@@ -47,7 +62,16 @@ python -m clap_launcher
 
 ## 상태
 
-🚧 **기획 단계 (v0.0)** — 현재는 계획 문서와 폴더 뼈대만 있습니다. 구현은 [PLAN.md의 마일스톤](docs/PLAN.md#5-개발-단계-마일스톤) 순서대로 진행합니다.
+🚧 **개발 중 (v0.0)** — [PLAN.md의 마일스톤](docs/PLAN.md#5-개발-단계-마일스톤) 순서대로 진행 중입니다.
+
+| 단계 | 내용 | 상태 |
+|------|------|------|
+| M0 | 계획·구조 잡기 | ✅ |
+| M1 | 마이크 입력 + 음량 미터 | ✅ |
+| M2 | 박수 1회 감지 (오탐 필터) | ⬅️ 다음 |
+| M3 | 박수 2회(짝짝) 감지 | ⬜ |
+| M4 | 프로그램 실행 연결 (MVP) | ⬜ |
+| M5 | 트레이 아이콘·편의 기능 | ⬜ |
 
 ## 환경
 
