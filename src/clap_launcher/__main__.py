@@ -1,31 +1,17 @@
 """진입점 — `python -m clap_launcher` 로 실행됩니다.
 
-현재 가능한 것 (M1):
-  --list-devices : 마이크 목록 보기
-  --level        : 실시간 음량 미터 (마이크가 들리는지 확인)
+옵션 없이 실행하면 GUI 창이 뜹니다 (일반 사용자용).
+아래 옵션들은 문제가 생겼을 때 콘솔에서 확인하는 디버깅용입니다.
 
-앞으로 붙을 것:
-  M3까지 완성되면 옵션 없이 실행했을 때 박수 감지가 돌아갑니다.
+  --list-devices : 마이크 목록 보기
+  --level        : 콘솔에서 실시간 음량 확인
 """
 
 import argparse
 import sys
 
 from . import __version__
-
-
-def _force_utf8_console() -> None:
-    """콘솔 출력을 UTF-8로 강제한다.
-
-    한글 Windows의 기본 콘솔 인코딩은 cp949라서 '—' 나 이모지(👏)를 출력하는 순간
-    UnicodeEncodeError 로 프로그램이 죽는다. 로그를 한국어로 쓰는 이 앱에서는
-    실제로 발생하는 문제라, 진입점에서 한 번 UTF-8로 바꿔둔다.
-    errors='replace' 는 그래도 못 그리는 글자가 있을 때 죽는 대신 '?'로 대체하기 위함.
-    """
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is not None:  # 파이프로 연결된 경우 등 reconfigure가 없을 수 있다
-            reconfigure(encoding="utf-8", errors="replace")
+from .console import force_utf8_console
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -36,11 +22,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument(
         "--list-devices", action="store_true",
-        help="사용 가능한 마이크 목록을 보여줍니다.",
+        help="[디버깅] 사용 가능한 마이크 목록을 콘솔에 출력합니다.",
     )
     parser.add_argument(
         "--level", action="store_true",
-        help="실시간 음량 미터를 켭니다. 마이크가 제대로 들리는지 확인용입니다.",
+        help="[디버깅] 콘솔에서 실시간 음량 미터를 켭니다.",
+    )
+    parser.add_argument(
+        "--reset-setup", action="store_true",
+        help="저장된 마이크 선택을 지우고 처음 선택 화면부터 다시 시작합니다.",
     )
     parser.add_argument(
         "--device", default=None,
@@ -62,7 +52,7 @@ def _parse_device(raw: str | None) -> int | str | None:
 
 def main(argv: list[str] | None = None) -> int:
     """실행 결과를 종료 코드로 반환한다 (0=정상)."""
-    _force_utf8_console()
+    force_utf8_console()
     args = _build_parser().parse_args(argv)
 
     # 무거운 오디오 라이브러리는 실제로 필요할 때만 불러온다.
@@ -81,18 +71,36 @@ def main(argv: list[str] | None = None) -> int:
             from .ui.level_meter import run_level_meter
             return run_level_meter(_parse_device(args.device), args.duration)
 
+        if args.reset_setup:
+            from .settings import Settings, save_settings
+            save_settings(Settings())
+            print("마이크 선택을 초기화했습니다. 다음 실행 때 선택 화면이 다시 나옵니다.")
+            return 0
+
     except AudioDeviceError as exc:
         # 마이크 문제는 사용자가 직접 고칠 수 있는 문제이므로,
         # 파이썬 traceback 대신 해결 방법이 담긴 메시지만 보여준다.
         print(f"\n❌ {exc}", file=sys.stderr)
         return 1
 
-    print(f"Clapping Setup v{__version__}")
-    print("아직 박수 감지 기능은 구현 전입니다 (진행 상황: docs/PLAN.md).")
-    print("지금 해볼 수 있는 것:")
-    print("  python -m clap_launcher --list-devices   마이크 목록 보기")
-    print("  python -m clap_launcher --level          실시간 음량 확인")
-    return 0
+    # 옵션이 없으면 GUI를 띄운다 (일반 사용자가 실행하는 경로)
+    return _run_gui()
+
+
+def _run_gui() -> int:
+    """GUI를 띄운다. tkinter가 없는 환경도 있으므로 그때는 안내를 남긴다."""
+    try:
+        from .ui.app import run_gui
+    except ImportError as exc:
+        # 리눅스 배포판 등에서 파이썬만 깔고 tk를 안 깐 경우가 있다.
+        print(
+            f"❌ 화면을 띄우는 데 필요한 tkinter를 불러오지 못했습니다: {exc}\n"
+            "   콘솔에서 확인하려면 다음을 써보세요:\n"
+            "     python -m clap_launcher --level",
+            file=sys.stderr,
+        )
+        return 1
+    return run_gui()
 
 
 if __name__ == "__main__":
