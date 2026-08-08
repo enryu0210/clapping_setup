@@ -65,6 +65,8 @@ clapping_setup/
 │   │   └── app_launcher.py     [4] 프로그램 실행
 │   ├── console.py              콘솔 인코딩 보정 (한글 Windows 대응)
 │   ├── settings.py             기기별 설정 저장 (고른 마이크 등)
+│   ├── listening.py            언제 듣고 언제 멈출지 (듣는 중 / 대기 중)
+│   ├── session_lock.py         Windows 화면 잠금 상태 감지
 │   └── ui/                     🖥️ 화면
 │       ├── __init__.py
 │       ├── app.py              창 관리·화면 전환·주기적 갱신

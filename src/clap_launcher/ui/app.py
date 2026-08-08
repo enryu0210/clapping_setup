@@ -11,8 +11,8 @@
 import tkinter as tk
 from tkinter import ttk
 
-from ..config import DetectionConfig
 from ..console import force_utf8_console
+from ..session_lock import LockWatcher, is_session_locked
 from ..settings import Settings, load_settings
 from . import widgets as w
 from .audio_monitor import AudioMonitor
@@ -22,7 +22,10 @@ from .main_page import MainPage
 
 WINDOW_TITLE = "Clapping Setup"
 WINDOW_SIZE = "600x760"
-UI_REFRESH_MS = 50   # 화면 갱신 주기. 20fps면 막대가 충분히 부드럽다.
+UI_REFRESH_MS = 50        # 화면 갱신 주기. 20fps면 막대가 충분히 부드럽다.
+LOCK_POLL_MS = 1500       # 화면 잠금 상태를 확인하는 주기.
+# 1.5초면 충분한 이유: 잠금이 풀린 걸 1초 늦게 알아도 사용자는 아직 자리에 앉는 중이다.
+# 더 자주 물어봐야 할 이유가 없고, Windows API 호출도 공짜는 아니다.
 
 
 def _enable_dpi_awareness() -> None:
@@ -46,6 +49,7 @@ class ClapLauncherApp(tk.Tk):
         self.monitor = AudioMonitor()
         self.current_page: ttk.Frame | None = None
         self._closed = False   # 정리를 두 번 하지 않기 위한 표시
+        self._lock_watcher = LockWatcher()
 
         self.title(WINDOW_TITLE)
         self.geometry(WINDOW_SIZE)
@@ -68,6 +72,7 @@ class ClapLauncherApp(tk.Tk):
 
         self._bring_to_front()
         self.after(UI_REFRESH_MS, self._tick)
+        self.after(LOCK_POLL_MS, self._check_session_lock)
 
     def _bring_to_front(self) -> None:
         """창을 확실히 맨 앞에 띄운다.
@@ -116,6 +121,17 @@ class ClapLauncherApp(tk.Tk):
         style.configure("TScrollbar", background=w.BG_PANEL, troughcolor=w.BG,
                         borderwidth=0, arrowcolor=w.FG_MUTED)
 
+        style.configure("TCheckbutton", background=w.BG, foreground=w.FG, font=w.FONT_BODY,
+                        focuscolor=w.BG, indicatorbackground=w.BG_PANEL,
+                        indicatorforeground=w.FG, padding=(0, 4))
+        style.map("TCheckbutton",
+                  background=[("active", w.BG)],
+                  indicatorbackground=[("selected", w.ACCENT), ("active", "#3a3d4a")],
+                  indicatorforeground=[("selected", "#ffffff")])
+
+        style.configure("TSpinbox", fieldbackground=w.BG_PANEL, background=w.BG_PANEL,
+                        foreground=w.FG, borderwidth=0, arrowcolor=w.FG_MUTED)
+
     # ── 화면 전환 ──────────────────────────────────────────
     def _swap_page(self, page: ttk.Frame) -> None:
         if self.current_page is not None:
@@ -128,13 +144,11 @@ class ClapLauncherApp(tk.Tk):
                                    on_done=self.show_main_page))
 
     def show_main_page(self) -> None:
+        # 마이크를 언제 열고 닫을지는 메인 화면이 스스로 관리한다(듣는 중 / 대기 중).
+        # 여기서 monitor.start 를 부르면 그 상태 관리와 어긋난다.
         self._swap_page(MainPage(self.container, self.monitor, self.settings,
                                  on_change_device=self.show_device_page,
                                  on_calibrate=self.show_calibrate_page))
-        # 메인 화면에서는 음량만이 아니라 박수 감지까지 돌린다.
-        # 보정한 기준값이 있으면 그것을, 없으면 기본값을 쓴다.
-        self.monitor.start(self.settings.device,
-                           DetectionConfig.from_dict(self.settings.detection or {}))
 
     def show_calibrate_page(self) -> None:
         self._swap_page(CalibratePage(self.container, self.monitor, self.settings,
@@ -154,6 +168,30 @@ class ClapLauncherApp(tk.Tk):
             except tk.TclError:
                 return   # 창이 닫히는 중이면 조용히 멈춘다
         self.after(UI_REFRESH_MS, self._tick)
+
+    def _check_session_lock(self) -> None:
+        """화면 잠금이 방금 풀렸으면 현재 화면에 알려준다.
+
+        Windows 세션 알림을 제대로 받으려면 창 핸들과 메시지 루프가 필요해 Tkinter와
+        엮기 까다롭다. 잠금 해제를 1~2초 늦게 알아도 아무 문제가 없으므로
+        주기적으로 물어보는 방식을 쓴다.
+        """
+        if self._closed:
+            return
+
+        try:
+            just_unlocked = self._lock_watcher.update(is_session_locked())
+        except Exception:
+            just_unlocked = False   # 잠금 감지가 실패해도 프로그램 본체는 계속 돌아야 한다
+
+        page = self.current_page
+        if just_unlocked and page is not None and hasattr(page, "on_session_unlocked"):
+            try:
+                page.on_session_unlocked()
+            except tk.TclError:
+                return   # 창이 닫히는 중
+
+        self.after(LOCK_POLL_MS, self._check_session_lock)
 
     def on_close(self) -> None:
         """창을 닫을 때 오디오 스레드를 확실히 멈추고 나간다.

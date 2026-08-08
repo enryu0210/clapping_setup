@@ -34,6 +34,10 @@ class Settings:
     # 마이크마다 값이 다르므로 이것도 기기별 정보다 — 저장소가 아니라 여기에 둔다.
     detection: dict | None = None
 
+    # ── 언제 마이크를 열 것인가 (자세한 배경은 listening.py 참고) ──
+    auto_arm_on_unlock: bool = True   # 화면 잠금이 풀리면 자동으로 듣기 시작
+    listen_timeout_min: float = 5.0   # 이 시간 동안 박수가 없으면 자동으로 멈춤 (0=무제한)
+
     def to_dict(self) -> dict:
         return asdict(self)
 
