@@ -43,6 +43,7 @@ class ClapLauncherApp(tk.Tk):
         self.settings = settings if settings is not None else load_settings()
         self.monitor = AudioMonitor()
         self.current_page: ttk.Frame | None = None
+        self._closed = False   # 정리를 두 번 하지 않기 위한 표시
 
         self.title(WINDOW_TITLE)
         self.geometry(WINDOW_SIZE)
@@ -63,7 +64,23 @@ class ClapLauncherApp(tk.Tk):
         else:
             self.show_device_page()
 
+        self._bring_to_front()
         self.after(UI_REFRESH_MS, self._tick)
+
+    def _bring_to_front(self) -> None:
+        """창을 확실히 맨 앞에 띄운다.
+
+        터미널에서 실행하면 Tk 창이 터미널 **뒤에** 열리는 경우가 있다.
+        사용자 입장에서는 아무 일도 안 일어난 것처럼 보여서 Ctrl+C 를 누르게 된다.
+        잠깐만 '항상 위'로 올렸다가 바로 풀어준다. 계속 위로 두면 다른 작업에 방해가 된다.
+        """
+        try:
+            self.lift()
+            self.attributes("-topmost", True)
+            self.after(200, lambda: self.attributes("-topmost", False))
+            self.focus_force()
+        except tk.TclError:
+            pass   # 창 띄우기에 실패해도 프로그램이 죽을 이유는 없다
 
     def _setup_styles(self) -> None:
         """ttk 위젯의 색과 글꼴을 한 번에 정한다."""
@@ -129,9 +146,19 @@ class ClapLauncherApp(tk.Tk):
         self.after(UI_REFRESH_MS, self._tick)
 
     def on_close(self) -> None:
-        """창을 닫을 때 오디오 스레드를 확실히 멈추고 나간다."""
+        """창을 닫을 때 오디오 스레드를 확실히 멈추고 나간다.
+
+        여러 번 불려도 안전해야 한다: 사용자가 X를 누른 뒤에도 마무리 정리(finally)에서
+        한 번 더 부르기 때문이다. 이미 닫힌 창에 destroy()를 부르면 오류가 난다.
+        """
+        if self._closed:
+            return
+        self._closed = True
         self.monitor.stop()
-        self.destroy()
+        try:
+            self.destroy()
+        except tk.TclError:
+            pass   # 이미 창이 사라진 상태 — 정상적인 종료 경로다
 
 
 def run_gui() -> int:
@@ -140,5 +167,14 @@ def run_gui() -> int:
     force_utf8_console()
     _enable_dpi_awareness()
     app = ClapLauncherApp()
-    app.mainloop()
+    try:
+        app.mainloop()
+    except KeyboardInterrupt:
+        # 터미널에서 Ctrl+C 로 끄는 것은 '오류'가 아니라 정상적인 종료 방법이다.
+        # 그냥 두면 파이썬 traceback이 그대로 쏟아져서 사용자는 프로그램이 고장 난 줄 안다.
+        print("\n종료합니다.")
+    finally:
+        # 어떻게 끝났든 마이크는 반드시 놓아준다.
+        # 이걸 빠뜨리면 창은 사라졌는데 마이크를 붙잡은 프로세스가 남는다.
+        app.on_close()
     return 0

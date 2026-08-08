@@ -82,6 +82,10 @@ def main(argv: list[str] | None = None) -> int:
         # 파이썬 traceback 대신 해결 방법이 담긴 메시지만 보여준다.
         print(f"\n❌ {exc}", file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        # Ctrl+C 는 정상적인 종료 방법이다. traceback을 쏟아내면 고장 난 줄 안다.
+        print("\n종료합니다.")
+        return 0
 
     # 옵션이 없으면 GUI를 띄운다 (일반 사용자가 실행하는 경로)
     return _run_gui()
