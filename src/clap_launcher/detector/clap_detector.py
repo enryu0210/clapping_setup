@@ -203,4 +203,8 @@ class ClapDetector:
             return f"너무 밋밋한 잡음({f.flatness:.2f}) — 키보드·딸깍 소리"
         if f.decay_ms > c.max_decay_ms:
             return f"너무 길게 이어짐({f.decay_ms:.0f}ms) — 종이·음악"
+        if f.decay_ms < c.min_decay_ms:
+            # 박수는 손바닥이 부딪힌 뒤 잠깐 울린다. 키보드·마우스 딸깍은 그 울림이 없어
+            # 훨씬 짧게 끝난다. (실측: 박수 26ms, 키보드 10ms)
+            return f"너무 짧음({f.decay_ms:.0f}ms) — 키보드·클릭"
         return ""

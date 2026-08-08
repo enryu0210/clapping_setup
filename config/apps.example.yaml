@@ -38,6 +38,7 @@ detection:
   min_zero_crossing_rate: 0.35  # 날카로움 하한  (박수 0.58) — 둔탁한 소리 배제
   max_harmonicity: 0.55       # 음정 상한        (기침 0.89) — 기침·말소리 배제
   max_decay_ms: 60.0          # 소리 길이 상한   (종이 110ms) — 종이·음악 배제
+  min_decay_ms: 14.0          # 소리 길이 하한   (키보드 10ms) — 키보드·클릭 배제
 
   # 3단계: "짝-짝인가" 판단
   min_interval_ms: 150        # 두 박수 사이 최소 간격 (ms) — 잔향을 두 번으로 세는 것 방지

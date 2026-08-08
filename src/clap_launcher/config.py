@@ -29,6 +29,7 @@ class DetectionConfig:
     min_zero_crossing_rate: float = 0.35   # 날카로움 하한 (둔탁한 소리 배제. 박수 0.58)
     max_harmonicity: float = 0.55      # 음정 상한 (**기침·말소리 배제.** 기침 실측 0.89)
     max_decay_ms: float = 60.0         # 소리 길이 상한 (**종이·음악 배제.** 박수 25ms, 종이 110ms)
+    min_decay_ms: float = 14.0         # 소리 길이 하한 (**키보드 배제.** 박수 26ms, 키보드 10ms)
 
     # ── 3단계: "짝-짝인가" 판단 ──
     min_interval_ms: int = 150       # 두 박수 사이 최소 간격 (잔향을 두 번으로 세지 않기 위함)
@@ -55,6 +56,7 @@ class DetectionConfig:
             min_zero_crossing_rate=0.05,  # 웅웅거리는 소리 배제
             max_harmonicity=0.75,         # 명백한 말소리(0.9+) 배제
             max_decay_ms=200.0,           # 명백히 긴 소리 배제
+            min_decay_ms=0.0,             # 짧은 소리도 일단 관찰한다 (그게 잡음 샘플이 된다)
             cooldown_sec=0.0,
         )
 
