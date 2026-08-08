@@ -16,7 +16,7 @@ from ..config import DetectionConfig
 from ..detector.calibration import MIN_SAMPLE_PEAK, REQUIRED_SAMPLES, derive_config
 from ..settings import save_settings
 from . import widgets as w
-from .audio_monitor import AudioMonitor
+from .audio_monitor import AudioMonitor, take_new_events
 
 
 class CalibratePage(ttk.Frame):
@@ -29,7 +29,7 @@ class CalibratePage(ttk.Frame):
         self.on_done = on_done
 
         self.samples = []          # 모은 박수의 특징값
-        self._consumed = 0         # 모니터의 이벤트 목록 중 어디까지 읽었는지
+        self._consumed = 0         # 지금까지 읽어간 이벤트의 누적 개수
         self._ignored = 0          # 너무 작아서 무시한 소리 개수
         self.result = None         # 계산된 보정 결과
 
@@ -117,9 +117,12 @@ class CalibratePage(ttk.Frame):
         if len(self.samples) >= REQUIRED_SAMPLES:
             return   # 다 모았으면 더 받지 않는다
 
-        # 모니터는 최근 이벤트만 들고 있으므로, 아직 안 읽은 것만 가져온다
-        new_events = snapshot.events[self._consumed:]
-        self._consumed = len(snapshot.events)
+        # 모니터는 최근 이벤트만 들고 있으므로, 아직 안 읽은 것만 가져온다.
+        # (누적 개수로 세야 한다. 목록 길이로 세면 버퍼가 찬 뒤로 멈춰버린다)
+        new_events, _dropped = take_new_events(
+            snapshot.events, snapshot.event_count, self._consumed
+        )
+        self._consumed = snapshot.event_count
 
         for event in new_events:
             if len(self.samples) >= REQUIRED_SAMPLES:

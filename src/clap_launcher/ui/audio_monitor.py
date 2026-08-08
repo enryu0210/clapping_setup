@@ -37,7 +37,12 @@ class MonitorSnapshot:
     running: bool = False
 
     # ── 박수 감지 관련 (감지를 켰을 때만 채워진다) ──
-    events: tuple[SoundEvent, ...] = ()      # 최근 분석한 소리들 (걸러진 것 포함)
+    events: tuple[SoundEvent, ...] = ()      # **최근** 분석한 소리들 (걸러진 것 포함)
+    # ⚠️ events 는 최근 것만 남기고 오래된 건 버리므로 길이가 RECENT_EVENT_LIMIT 에서 멈춘다.
+    #    "어디까지 봤는지"를 events 길이로 세면, 버퍼가 가득 찬 뒤로는 길이가 안 변해서
+    #    화면이 "새 이벤트가 없다"고 착각하고 로그가 멈춘다(실제로 발생했던 버그).
+    #    그래서 **한 번도 줄지 않는 누적 개수**를 따로 둔다.
+    event_count: int = 0                     # 지금까지 분석한 소리의 누적 개수
     trigger_count: int = 0                   # '짝짝'이 완성된 횟수
     last_trigger_at: float = 0.0             # 마지막 발동 시각 (monotonic)
 
@@ -45,6 +50,31 @@ class MonitorSnapshot:
     def is_loud_enough(self) -> bool:
         """이 마이크로 박수가 잡히는지 여부. 마이크 선택 화면에서 ✅ 표시에 쓴다."""
         return self.session_max_dbfs >= LOUD_ENOUGH_DBFS
+
+
+def take_new_events(events: tuple[SoundEvent, ...], total_count: int,
+                    seen_count: int) -> tuple[tuple[SoundEvent, ...], int]:
+    """아직 화면에 안 보여준 이벤트만 골라낸다.
+
+    화면 파일에 두지 않고 여기에 둔 이유: 같은 계산을 메인 화면과 보정 화면 두 곳에서
+    쓰는데, 여기가 틀리면 **로그가 조용히 멈춰버린다.** 실제로 그런 버그가 있었고,
+    창을 띄우지 않고 테스트할 수 있도록 순수 함수로 분리했다.
+
+    Args:
+        events: 모니터가 들고 있는 최근 이벤트들 (오래된 것은 이미 버려짐)
+        total_count: 지금까지 만들어진 이벤트의 누적 개수
+        seen_count: 화면이 지금까지 처리한 개수
+
+    Returns:
+        (새로 보여줄 이벤트들, 못 보고 놓친 개수)
+        화면 갱신이 한참 밀리면 버퍼에서 사라진 이벤트가 생기는데, 그 개수를 함께 알려준다.
+    """
+    pending = max(0, total_count - seen_count)
+    if pending == 0:
+        return (), 0
+    if pending <= len(events):
+        return events[len(events) - pending:], 0
+    return events, pending - len(events)
 
 
 class AudioMonitor:
@@ -88,7 +118,7 @@ class AudioMonitor:
         self._update(
             level_dbfs=SILENCE_DBFS, peak_dbfs=SILENCE_DBFS, session_max_dbfs=SILENCE_DBFS,
             device_desc="", error="", running=True,
-            events=(), trigger_count=0, last_trigger_at=0.0,
+            events=(), event_count=0, trigger_count=0, last_trigger_at=0.0,
         )
         # daemon=True : 창을 강제로 닫아도 이 스레드가 프로그램을 붙잡고 있지 않게
         self._thread = threading.Thread(
@@ -144,6 +174,7 @@ class AudioMonitor:
                         if event is not None:
                             # 최근 것만 남긴다 (오래된 이벤트는 화면에도 안 보인다)
                             changes["events"] = (snapshot.events + (event,))[-RECENT_EVENT_LIMIT:]
+                            changes["event_count"] = snapshot.event_count + 1
                             if event.triggered:
                                 changes["trigger_count"] = snapshot.trigger_count + 1
                                 changes["last_trigger_at"] = now

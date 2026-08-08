@@ -15,7 +15,7 @@ from tkinter import ttk
 
 from ..config import DetectionConfig
 from . import widgets as w
-from .audio_monitor import AudioMonitor
+from .audio_monitor import AudioMonitor, take_new_events
 
 TRIGGER_FLASH_SEC = 3.0   # 발동 후 몇 초간 크게 표시할지
 
@@ -31,7 +31,7 @@ class MainPage(ttk.Frame):
         self.on_change_device = on_change_device
         self.on_calibrate = on_calibrate
         self.listening = True     # 일시정지 여부. 회의 중에는 끌 수 있어야 한다.
-        self._shown_events = 0    # 로그에 이미 그린 이벤트 개수
+        self._shown_events = 0    # 로그에 이미 그린 이벤트의 누적 개수
 
         self._build()
 
@@ -133,7 +133,13 @@ class MainPage(ttk.Frame):
 
     def _update_log(self, snapshot) -> None:
         """새로 들어온 소리만 로그에 덧붙인다 (매번 전체를 다시 그리면 깜빡인다)."""
-        for event in snapshot.events[self._shown_events:]:
+        new_events, dropped = take_new_events(
+            snapshot.events, snapshot.event_count, self._shown_events
+        )
+        if dropped:
+            self.log.insert(tk.END, f" … {dropped}개 생략됨")
+
+        for event in new_events:
             if event.triggered:
                 text = "🎉 짝짝! 발동"
             elif event.is_clap:
@@ -142,7 +148,7 @@ class MainPage(ttk.Frame):
                 text = f"·  {event.reject_reason}"
             self.log.insert(tk.END, f" {text}")
             self.log.see(tk.END)
-        self._shown_events = len(snapshot.events)
+        self._shown_events = snapshot.event_count
 
         # 목록이 무한정 길어지지 않게 오래된 줄을 지운다
         while self.log.size() > 200:
