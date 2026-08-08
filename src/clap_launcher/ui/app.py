@@ -11,15 +11,17 @@
 import tkinter as tk
 from tkinter import ttk
 
+from ..config import DetectionConfig
 from ..console import force_utf8_console
 from ..settings import Settings, load_settings
 from . import widgets as w
 from .audio_monitor import AudioMonitor
+from .calibrate_page import CalibratePage
 from .device_page import DevicePage
 from .main_page import MainPage
 
 WINDOW_TITLE = "Clapping Setup"
-WINDOW_SIZE = "580x640"
+WINDOW_SIZE = "600x760"
 UI_REFRESH_MS = 50   # 화면 갱신 주기. 20fps면 막대가 충분히 부드럽다.
 
 
@@ -47,7 +49,7 @@ class ClapLauncherApp(tk.Tk):
 
         self.title(WINDOW_TITLE)
         self.geometry(WINDOW_SIZE)
-        self.minsize(560, 600)
+        self.minsize(580, 700)
         self.configure(bg=w.BG)
         self._setup_styles()
 
@@ -127,8 +129,16 @@ class ClapLauncherApp(tk.Tk):
 
     def show_main_page(self) -> None:
         self._swap_page(MainPage(self.container, self.monitor, self.settings,
-                                 on_change_device=self.show_device_page))
-        self.monitor.start(self.settings.device)
+                                 on_change_device=self.show_device_page,
+                                 on_calibrate=self.show_calibrate_page))
+        # 메인 화면에서는 음량만이 아니라 박수 감지까지 돌린다.
+        # 보정한 기준값이 있으면 그것을, 없으면 기본값을 쓴다.
+        self.monitor.start(self.settings.device,
+                           DetectionConfig.from_dict(self.settings.detection or {}))
+
+    def show_calibrate_page(self) -> None:
+        self._swap_page(CalibratePage(self.container, self.monitor, self.settings,
+                                      on_done=self.show_main_page))
 
     # ── 주기적 갱신 ────────────────────────────────────────
     def _tick(self) -> None:

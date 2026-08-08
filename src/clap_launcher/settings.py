@@ -30,6 +30,9 @@ class Settings:
     device: int | str | None = None   # 고른 마이크 (번호 또는 이름 일부)
     device_label: str = ""            # 화면에 보여줄 이름. 번호가 바뀌어도 사람이 알아보게
     setup_done: bool = False          # 마이크 선택을 한 번이라도 끝냈는가
+    # 보정 결과(기준값). None이면 기본값을 쓴다.
+    # 마이크마다 값이 다르므로 이것도 기기별 정보다 — 저장소가 아니라 여기에 둔다.
+    detection: dict | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
