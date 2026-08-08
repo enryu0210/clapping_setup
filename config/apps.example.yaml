@@ -1,0 +1,49 @@
+# ================================================================
+#  Clapping Setup 설정 예시
+#
+#  사용법: 이 파일을 같은 폴더에 apps.yaml 이름으로 복사한 뒤,
+#          본인 PC의 실제 경로로 고쳐서 쓰세요.
+#            copy config\apps.example.yaml config\apps.yaml
+#
+#  ※ apps.yaml 은 git에 올라가지 않습니다(경로가 기기마다 달라서).
+#  ※ 자세한 설명은 docs/CONFIG.md 참고.
+# ================================================================
+
+# ---------------- 박수 감지 민감도 ----------------
+# 기본값으로 먼저 써보고, 오탐/미감지가 있을 때만 조절하세요.
+detection:
+  sensitivity: 6.0        # 배경 소음 대비 몇 배 커야 박수로 볼지 (↑ 둔감, ↓ 예민)
+  min_interval_ms: 150    # 두 박수 사이 최소 간격 (ms) — 잔향을 두 번으로 세는 것 방지
+  max_interval_ms: 800    # 두 박수 사이 최대 간격 (ms) — 이보다 느리면 무시
+  high_freq_ratio: 0.4    # 고음(2kHz+) 비율 하한 — 문 닫는 소리 같은 저음 배제
+  cooldown_sec: 5.0       # 발동 후 재감지 금지 시간 (초)
+
+# ---------------- 박수 치면 실행할 것들 ----------------
+# 위에서 아래 순서대로 실행됩니다.
+# type: exe(프로그램) / url(웹주소) / folder(탐색기) / store(스토어 앱)
+# 경로의 역슬래시(\)는 문제가 생길 수 있으니 슬래시(/)를 권장합니다.
+apps:
+  - name: VS Code
+    type: exe
+    path: "C:/Program Files/Microsoft VS Code/Code.exe"
+    args: []              # 예: ["F:/dev/my-project"] 처럼 열 폴더 지정 가능
+    delay: 1.0            # 무거운 프로그램이라 다음 항목까지 1초 대기
+
+  - name: 업무 브라우저
+    type: exe
+    path: "C:/Program Files/Google/Chrome/Application/chrome.exe"
+    args: ["https://github.com"]
+
+  - name: 작업 폴더 열기
+    type: folder
+    path: "F:/dev"
+
+  - name: 캘린더 확인
+    type: url
+    path: "https://calendar.google.com"
+
+  # enabled: false 로 두면 지우지 않고 잠시 꺼둘 수 있습니다.
+  - name: Spotify
+    type: exe
+    path: "C:/Users/사용자이름/AppData/Roaming/Spotify/Spotify.exe"
+    enabled: false

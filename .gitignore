@@ -1,0 +1,36 @@
+# ---- 개인/기기 전용 설정 ----
+# 프로그램 설치 경로는 PC마다 달라서 공유하면 안 됨 (example 파일만 공유)
+config/apps.yaml
+CLAUDE.local.md
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# ---- 테스트/도구 캐시 ----
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- 로그 / 실행 산출물 ----
+*.log
+logs/
+
+# ---- 녹음 파일 ----
+# 이 앱은 오디오를 저장하지 않지만, 디버깅 중 임시로 뽑는 경우를 대비
+*.wav
+recordings/
+
+# ---- 에디터 / OS ----
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

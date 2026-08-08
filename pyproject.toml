@@ -1,0 +1,23 @@
+# 패키지가 src/ 아래에 있어서, 그냥 `python -m clap_launcher` 하면 못 찾습니다.
+# `pip install -e .` 한 번으로 경로가 잡히도록 최소 설정만 둡니다.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clap-launcher"
+version = "0.0.0"
+description = "박수 두 번으로 업무용 프로그램을 한 번에 실행하는 Windows 유틸리티"
+requires-python = ">=3.12"
+dependencies = [
+    "sounddevice>=0.4.6",
+    "numpy>=1.26",
+    "PyYAML>=6.0",
+]
+
+[project.scripts]
+# 설치 후 터미널에서 `clap-launcher` 만 쳐도 실행됩니다.
+clap-launcher = "clap_launcher.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
