@@ -3,6 +3,7 @@
 #   sounddevice : 마이크 입력 (Windows에서 wheel로 바로 설치됨. PyAudio는 빌드 이슈가 잦아 제외)
 #   numpy       : 음량(RMS)·주파수(FFT) 계산
 #   PyYAML      : 설정 파일 읽기 (JSON과 달리 주석을 쓸 수 있어서 선택)
+#   Pillow      : 뉴모피즘 UI의 부드러운 그림자 생성 (Tkinter엔 그림자 기능이 없다)
 -e .
 
 # ── 트레이 아이콘 단계(M5)에서 사용 ── 아직 구현 전이라 주석 처리

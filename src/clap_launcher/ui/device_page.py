@@ -14,8 +14,12 @@ from tkinter import ttk
 
 from ..audio.listener import AudioDeviceError, list_input_devices
 from ..settings import Settings, save_settings
-from . import widgets as w
+from . import icons, theme
 from .audio_monitor import AudioMonitor
+from .neumorphic import IconLabel, NeoButton, NeoPanel
+from .widgets import LevelMeter
+
+PANEL_WIDTH = 520
 
 
 class DevicePage(ttk.Frame):
@@ -28,7 +32,7 @@ class DevicePage(ttk.Frame):
             settings: 현재 설정. 고른 마이크를 여기에 적어 저장한다.
             on_done: 선택이 끝났을 때 부를 함수 (메인 화면으로 넘어가기)
         """
-        super().__init__(parent, padding=20)
+        super().__init__(parent, padding=(24, 20))
         self.monitor = monitor
         self.settings = settings
         self.on_done = on_done
@@ -39,24 +43,30 @@ class DevicePage(ttk.Frame):
 
     # ── 화면 구성 ──────────────────────────────────────────
     def _build(self) -> None:
-        ttk.Label(self, text="🎤 사용할 마이크를 고르세요", style="Title.TLabel").pack(anchor="w")
+        header = tk.Canvas(self, width=PANEL_WIDTH, height=38, bg=theme.BG,
+                           highlightthickness=0, bd=0)
+        header.pack(anchor="w")
+        icons.draw(header, "mic", 16, 19, 26, theme.ACCENT, width=2)
+        header.create_text(38, 20, text="사용할 마이크를 고르세요", anchor="w",
+                           fill=theme.FG, font=theme.FONT_TITLE)
+
         ttk.Label(
             self,
             text="목록에서 마이크를 고른 뒤 박수를 쳐보세요.\n"
                  "아래 막대가 크게 튀는 마이크가 정답입니다.",
             style="Muted.TLabel", justify="left",
-        ).pack(anchor="w", pady=(4, 12))
+        ).pack(anchor="w", pady=(6, 12))
 
         # ── 장치 목록 (30개가 넘으므로 스크롤 필요) ──
-        list_frame = ttk.Frame(self)
-        list_frame.pack(fill="both", expand=True)
+        panel = NeoPanel(self, width=PANEL_WIDTH, height=180, padding=10)
+        panel.pack(anchor="w")
 
-        scrollbar = ttk.Scrollbar(list_frame, orient="vertical")
+        scrollbar = ttk.Scrollbar(panel.body, orient="vertical")
         self.listbox = tk.Listbox(
-            list_frame, height=8, activestyle="none", exportselection=False,
-            bg=w.BG_PANEL, fg=w.FG, selectbackground=w.ACCENT, selectforeground="#ffffff",
-            highlightthickness=0, bd=0, font=w.FONT_BODY,
-            yscrollcommand=scrollbar.set,
+            panel.body, activestyle="none", exportselection=False,
+            bg=theme.BG_SUNKEN, fg=theme.FG, selectbackground=theme.ACCENT,
+            selectforeground=theme.FG_ON_ACCENT, highlightthickness=0, bd=0,
+            font=theme.FONT_BODY, yscrollcommand=scrollbar.set,
         )
         scrollbar.config(command=self.listbox.yview)
         self.listbox.pack(side="left", fill="both", expand=True)
@@ -64,34 +74,36 @@ class DevicePage(ttk.Frame):
         # 목록에서 고르는 즉시 그 장치로 듣기 시작한다 (별도 '미리듣기' 버튼이 필요 없게)
         self.listbox.bind("<<ListboxSelect>>", self._on_select)
 
-        ttk.Button(self, text="🔄 목록 새로고침", command=self.refresh_devices).pack(
-            anchor="w", pady=(8, 0)
-        )
-        ttk.Label(
-            self,
-            text="같은 마이크가 여러 번 보이는 것은 정상입니다 (드라이버 방식별로 하나씩).",
-            style="Small.TLabel",
-        ).pack(anchor="w", pady=(4, 12))
+        hint_row = ttk.Frame(self)
+        hint_row.pack(anchor="w", fill="x", pady=(4, 0))
+        NeoButton(hint_row, text="목록 새로고침", icon="refresh",
+                  command=self.refresh_devices, height=32).pack(side="left")
+        ttk.Label(hint_row, text="같은 마이크가 여러 번 보이는 것은 정상입니다\n"
+                                 "(드라이버 방식별로 하나씩).",
+                  style="Small.TLabel", justify="left").pack(side="left", padx=(6, 0))
 
         # ── 실시간 확인 영역 ──
         self.spec_label = ttk.Label(self, text="마이크를 선택하세요", style="Small.TLabel")
-        self.spec_label.pack(anchor="w")
+        self.spec_label.pack(anchor="w", pady=(10, 2))
 
         meter_row = ttk.Frame(self)
-        meter_row.pack(fill="x", pady=(6, 4))
-        self.meter = w.LevelMeter(meter_row)
+        meter_row.pack(fill="x")
+        self.meter = LevelMeter(meter_row)
         self.meter.pack(side="left")
         self.level_label = ttk.Label(meter_row, text="  --.- dBFS", style="Mono.TLabel")
-        self.level_label.pack(side="left", padx=(10, 0))
+        self.level_label.pack(side="left", padx=(6, 0))
 
-        self.status_label = ttk.Label(self, text="", style="Muted.TLabel", wraplength=500)
-        self.status_label.pack(anchor="w", pady=(4, 12))
+        self.status_label = IconLabel(self, width=PANEL_WIDTH, icon="hourglass", text="",
+                                      color=theme.FG_MUTED)
+        self.status_label.pack(anchor="w", pady=(2, 4))
+        self.detail_label = ttk.Label(self, text="", style="Muted.TLabel", wraplength=500,
+                                      justify="left")
+        self.detail_label.pack(anchor="w", pady=(0, 10))
 
-        self.confirm_button = ttk.Button(
-            self, text="이 마이크 사용하기", command=self._confirm, state="disabled",
-            style="Accent.TButton",
-        )
-        self.confirm_button.pack(anchor="e")
+        self.confirm_button = NeoButton(self, text="이 마이크 사용하기", icon="check",
+                                        command=self._confirm, accent=True)
+        self.confirm_button.pack(anchor="w")
+        self.confirm_button.configure_state(False)
 
     # ── 동작 ──────────────────────────────────────────────
     def refresh_devices(self) -> None:
@@ -101,7 +113,8 @@ class DevicePage(ttk.Frame):
         except Exception as exc:
             # 오디오 장치 조회 자체가 실패해도 창이 죽지는 않게 한다
             self.devices = []
-            self.status_label.config(text=f"❌ 장치 목록을 읽지 못했습니다: {exc}", foreground=w.ERROR)
+            self.status_label.set("장치 목록을 읽지 못했습니다", "warning", theme.ERROR)
+            self.detail_label.config(text=str(exc), foreground=theme.ERROR)
             return
 
         self.listbox.delete(0, tk.END)
@@ -109,10 +122,9 @@ class DevicePage(ttk.Frame):
             self.listbox.insert(tk.END, f" [{index:3d}]  {name}")
 
         if not self.devices:
-            self.status_label.config(
-                text="❌ 입력 장치를 찾지 못했습니다. 마이크가 연결돼 있는지 확인해 주세요.",
-                foreground=w.ERROR,
-            )
+            self.status_label.set("입력 장치를 찾지 못했습니다", "warning", theme.ERROR)
+            self.detail_label.config(text="마이크가 연결돼 있는지 확인해 주세요.",
+                                     foreground=theme.ERROR)
             return
 
         # 예전에 고른 장치가 있으면 그 자리를 미리 선택해 준다
@@ -137,13 +149,15 @@ class DevicePage(ttk.Frame):
         if not (0 <= row < len(self.devices)):
             return
         index, name = self.devices[row]
-        self.confirm_button.config(state="disabled")
-        self.status_label.config(text="마이크를 여는 중…", foreground=w.FG_MUTED)
+        self.confirm_button.configure_state(False)
+        self.status_label.set("마이크를 여는 중…", "hourglass", theme.FG_MUTED)
+        self.detail_label.config(text="")
         self.spec_label.config(text=f"선택: [{index}] {name}")
         try:
             self.monitor.start(index)
         except AudioDeviceError as exc:
-            self.status_label.config(text=f"❌ {exc}", foreground=w.ERROR)
+            self.status_label.set("마이크를 열지 못했습니다", "warning", theme.ERROR)
+            self.detail_label.config(text=str(exc), foreground=theme.ERROR)
 
     def update_from_monitor(self) -> None:
         """창이 주기적으로 불러준다. 최신 측정값을 화면에 반영한다.
@@ -155,8 +169,9 @@ class DevicePage(ttk.Frame):
         self.level_label.config(text=f"{snapshot.level_dbfs:7.1f} dBFS")
 
         if snapshot.error:
-            self.status_label.config(text=f"❌ {snapshot.error}", foreground=w.ERROR)
-            self.confirm_button.config(state="disabled")
+            self.status_label.set("마이크 오류", "warning", theme.ERROR)
+            self.detail_label.config(text=snapshot.error, foreground=theme.ERROR)
+            self.confirm_button.configure_state(False)
             return
 
         if snapshot.device_desc:
@@ -165,15 +180,13 @@ class DevicePage(ttk.Frame):
         if snapshot.is_loud_enough:
             # 소리가 확실히 잡힌 마이크만 '사용하기'를 열어준다.
             # 무음만 들어오는 가상 장치를 고르고 넘어가는 사고를 여기서 막는다.
-            self.status_label.config(
-                text="✅ 소리가 잘 잡힙니다. 이 마이크를 쓰면 됩니다.", foreground=w.OK
-            )
-            self.confirm_button.config(state="normal")
+            self.status_label.set("소리가 잘 잡힙니다. 이 마이크를 쓰면 됩니다.",
+                                  "check", theme.OK)
+            self.detail_label.config(text="")
+            self.confirm_button.configure_state(True)
         elif snapshot.running:
-            self.status_label.config(
-                text="⏳ 아직 큰 소리가 잡히지 않았습니다. 박수를 한 번 쳐보세요.",
-                foreground=w.WARN,
-            )
+            self.status_label.set("아직 큰 소리가 잡히지 않았습니다. 박수를 쳐보세요.",
+                                  "hourglass", theme.WARN)
 
     def _confirm(self) -> None:
         """고른 마이크를 저장하고 메인 화면으로 넘어간다."""
@@ -189,8 +202,7 @@ class DevicePage(ttk.Frame):
             save_settings(self.settings)
         except OSError as exc:
             # 저장에 실패해도 이번 실행은 계속 쓸 수 있어야 한다. 다음 실행 때 다시 고르면 된다.
-            self.status_label.config(
-                text=f"⚠️ 설정을 저장하지 못했습니다({exc}). 이번 실행에만 적용됩니다.",
-                foreground=w.WARN,
-            )
+            self.status_label.set("설정을 저장하지 못했습니다", "warning", theme.WARN)
+            self.detail_label.config(text=f"{exc}\n이번 실행에만 적용됩니다.",
+                                     foreground=theme.WARN)
         self.on_done()

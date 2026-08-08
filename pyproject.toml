@@ -13,6 +13,10 @@ dependencies = [
     "sounddevice>=0.4.6",
     "numpy>=1.26",
     "PyYAML>=6.0",
+    # 뉴모피즘 UI의 부드러운 그림자를 만드는 데 쓴다.
+    # Tkinter에는 그림자 기능이 없어서 그림자 이미지를 직접 생성해야 한다.
+    # 없어도 프로그램은 동작한다(그림자 없이 납작하게 그려진다).
+    "Pillow>=10.0",
 ]
 
 [project.scripts]

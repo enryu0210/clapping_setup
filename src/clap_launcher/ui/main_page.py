@@ -20,16 +20,19 @@ from tkinter import ttk
 from ..config import DetectionConfig
 from ..listening import ListeningSession, StopReason, format_remaining
 from ..settings import save_settings
-from . import widgets as w
+from . import icons, theme
 from .audio_monitor import AudioMonitor, take_new_events
+from .neumorphic import IconLabel, NeoButton, NeoPanel, NeoSegmented
+from .widgets import METER_MIN_DBFS, LevelMeter
 
-TIMEOUT_CHOICES = ("0", "1", "3", "5", "10", "15", "30")
+TIMEOUT_OPTIONS = [("1분", 1.0), ("3분", 3.0), ("5분", 5.0), ("10분", 10.0), ("무제한", 0.0)]
 
+# 멈춘 이유별 안내 문구와 아이콘
 STOP_MESSAGES = {
-    StopReason.NEVER_STARTED: "듣기를 시작하면 박수를 기다립니다.",
-    StopReason.TRIGGERED: "🎉 박수를 감지해서 실행했습니다.",
-    StopReason.TIMED_OUT: "⏱ 정해진 시간 동안 박수가 없어 멈췄습니다.",
-    StopReason.MANUAL: "직접 멈췄습니다.",
+    StopReason.NEVER_STARTED: ("듣기를 시작하면 박수를 기다립니다.", "standby"),
+    StopReason.TRIGGERED: ("박수를 감지해서 실행했습니다.", "sparkle"),
+    StopReason.TIMED_OUT: ("정해진 시간 동안 박수가 없어 멈췄습니다.", "clock"),
+    StopReason.MANUAL: ("직접 멈췄습니다.", "standby"),
 }
 
 
@@ -38,7 +41,7 @@ class MainPage(ttk.Frame):
 
     def __init__(self, parent, monitor: AudioMonitor, settings,
                  on_change_device, on_calibrate) -> None:
-        super().__init__(parent, padding=20)
+        super().__init__(parent, padding=(24, 20))
         self.monitor = monitor
         self.settings = settings
         self.on_change_device = on_change_device
@@ -53,70 +56,81 @@ class MainPage(ttk.Frame):
 
     # ── 화면 구성 ──────────────────────────────────────────
     def _build(self) -> None:
-        ttk.Label(self, text="👏 Clapping Setup", style="Title.TLabel").pack(anchor="w")
+        self._build_header()
 
-        self.status_label = ttk.Label(self, text="", style="Status.TLabel")
+        self.status_label = IconLabel(self, width=520, icon="headphones", text="",
+                                      color=theme.OK, font=theme.FONT_HEADING, icon_size=20)
         self.status_label.pack(anchor="w", pady=(10, 0))
-        self.reason_label = ttk.Label(self, text="", style="Muted.TLabel", wraplength=520)
+
+        self.reason_label = ttk.Label(self, text="", style="Muted.TLabel", wraplength=520,
+                                      justify="left")
         self.reason_label.pack(anchor="w", pady=(2, 2))
         self.device_label = ttk.Label(self, text=self._device_text(), style="Small.TLabel")
-        self.device_label.pack(anchor="w", pady=(2, 10))
+        self.device_label.pack(anchor="w", pady=(2, 6))
 
         # ── 음량 미터 ──
         meter_row = ttk.Frame(self)
         meter_row.pack(fill="x")
-        self.meter = w.LevelMeter(meter_row)
+        self.meter = LevelMeter(meter_row)
         self.meter.pack(side="left")
         self.level_label = ttk.Label(meter_row, text="  --.- dBFS", style="Mono.TLabel")
-        self.level_label.pack(side="left", padx=(10, 0))
+        self.level_label.pack(side="left", padx=(6, 0))
 
-        # ── 감지 로그 ──
-        log_box = ttk.LabelFrame(self, text=" 들린 소리 (걸러진 것 포함) ", padding=8)
-        log_box.pack(fill="both", expand=True, pady=(12, 10))
+        self._build_log()
+        self._build_options()
+        self._build_buttons()
+
+    def _build_header(self) -> None:
+        header = tk.Canvas(self, width=520, height=38, bg=theme.BG,
+                           highlightthickness=0, bd=0)
+        header.pack(anchor="w")
+        icons.draw(header, "clap", 16, 19, 28, theme.ACCENT, width=2)
+        header.create_text(40, 20, text="Clapping Setup", anchor="w",
+                           fill=theme.FG, font=theme.FONT_TITLE)
+
+    def _build_log(self) -> None:
+        ttk.Label(self, text="들린 소리 (걸러진 것 포함)", style="Small.TLabel").pack(
+            anchor="w", pady=(12, 4))
+
+        panel = NeoPanel(self, width=520, height=150, padding=10)
+        panel.pack(anchor="w")
         self.log = tk.Listbox(
-            log_box, height=7, activestyle="none",
-            bg=w.BG_PANEL, fg=w.FG_MUTED, highlightthickness=0, bd=0, font=w.FONT_MONO,
-            selectbackground=w.BG_PANEL, selectforeground=w.FG,
+            panel.body, activestyle="none", bg=theme.BG_SUNKEN, fg=theme.FG_MUTED,
+            highlightthickness=0, bd=0, font=theme.FONT_MONO,
+            selectbackground=theme.BG_SUNKEN, selectforeground=theme.FG,
         )
         self.log.pack(fill="both", expand=True)
 
         self.error_label = ttk.Label(self, text="", style="Muted.TLabel", wraplength=520)
         self.error_label.pack(anchor="w")
 
-        self._build_options()
-        self._build_buttons()
-
     def _build_options(self) -> None:
         """언제 들을지에 대한 설정 두 가지."""
-        options = ttk.Frame(self)
-        options.pack(fill="x", pady=(6, 10))
+        self.auto_arm_toggle = NeoToggleRow(
+            self, text="화면 잠금을 풀면 자동으로 듣기 시작",
+            value=self.settings.auto_arm_on_unlock, command=self._save_options,
+        )
+        self.auto_arm_toggle.pack(anchor="w", pady=(8, 0))
 
-        self.auto_arm_var = tk.BooleanVar(value=self.settings.auto_arm_on_unlock)
-        ttk.Checkbutton(
-            options, text="화면 잠금을 풀면 자동으로 듣기 시작",
-            variable=self.auto_arm_var, command=self._save_options,
-        ).pack(anchor="w")
-
-        row = ttk.Frame(options)
-        row.pack(anchor="w", pady=(6, 0))
-        ttk.Label(row, text="듣는 시간", style="Small.TLabel").pack(side="left")
-        self.timeout_var = tk.StringVar(value=str(int(self.settings.listen_timeout_min)))
-        ttk.Spinbox(
-            row, values=TIMEOUT_CHOICES, textvariable=self.timeout_var, width=4,
-            command=self._save_options, state="readonly",
-        ).pack(side="left", padx=6)
-        ttk.Label(row, text="분  (0 = 무제한)", style="Small.TLabel").pack(side="left")
+        row = ttk.Frame(self)
+        row.pack(anchor="w", pady=(2, 6))
+        ttk.Label(row, text="듣는 시간", style="Small.TLabel").pack(side="left", padx=(2, 8))
+        self.timeout_picker = NeoSegmented(
+            row, options=TIMEOUT_OPTIONS, value=self.settings.listen_timeout_min,
+            command=self._save_options,
+        )
+        self.timeout_picker.pack(side="left")
 
     def _build_buttons(self) -> None:
         row = ttk.Frame(self)
-        row.pack(fill="x")
-        self.toggle_button = ttk.Button(row, text="", command=self._toggle_listening,
-                                        style="Accent.TButton")
+        row.pack(anchor="w", pady=(4, 0))
+        self.toggle_button = NeoButton(row, text="듣기 중지", icon="stop",
+                                       command=self._toggle_listening, accent=True)
         self.toggle_button.pack(side="left")
-        ttk.Button(row, text="🎯 박수 보정", command=self.on_calibrate).pack(
-            side="left", padx=(8, 0))
-        ttk.Button(row, text="🎤 마이크 변경", command=self.on_change_device).pack(
-            side="left", padx=(8, 0))
+        NeoButton(row, text="박수 보정", icon="target",
+                  command=self.on_calibrate).pack(side="left")
+        NeoButton(row, text="마이크 변경", icon="mic",
+                  command=self.on_change_device).pack(side="left")
 
     def _device_text(self) -> str:
         mic = self.settings.device_label or "기본 장치"
@@ -125,11 +139,8 @@ class MainPage(ttk.Frame):
 
     def _save_options(self) -> None:
         """설정을 바꾸면 바로 저장한다. 다음 실행에도 유지되어야 하기 때문이다."""
-        self.settings.auto_arm_on_unlock = self.auto_arm_var.get()
-        try:
-            self.settings.listen_timeout_min = float(self.timeout_var.get())
-        except ValueError:
-            self.settings.listen_timeout_min = 5.0
+        self.settings.auto_arm_on_unlock = self.auto_arm_toggle.value
+        self.settings.listen_timeout_min = self.timeout_picker.value
         try:
             save_settings(self.settings)
         except OSError:
@@ -149,7 +160,7 @@ class MainPage(ttk.Frame):
         """마이크를 닫는다. 대기 중에는 마이크를 아예 잡지 않는다."""
         self.session.disarm(reason)
         self.monitor.stop()
-        self.meter.set_level(w.METER_MIN_DBFS, w.METER_MIN_DBFS)
+        self.meter.set_level(METER_MIN_DBFS, METER_MIN_DBFS)
         self.level_label.config(text="   --.- dBFS")
         self._refresh_status()
 
@@ -167,8 +178,8 @@ class MainPage(ttk.Frame):
         if not self.settings.auto_arm_on_unlock or self.session.armed:
             return
         self.start_listening()
-        self.reason_label.config(text="🔓 화면 잠금이 풀려서 듣기를 시작했습니다.",
-                                 foreground=w.ACCENT)
+        self.reason_label.config(text="화면 잠금이 풀려서 듣기를 시작했습니다.",
+                                 foreground=theme.ACCENT)
 
     # ── 주기적 갱신 ────────────────────────────────────────
     def update_from_monitor(self) -> None:
@@ -189,8 +200,8 @@ class MainPage(ttk.Frame):
 
         if snapshot.error:
             self.error_label.config(
-                text=f"❌ {snapshot.error}\n'마이크 변경'에서 다른 장치를 골라보세요.",
-                foreground=w.ERROR)
+                text=f"{snapshot.error}\n'마이크 변경'에서 다른 장치를 골라보세요.",
+                foreground=theme.ERROR)
             return
         self.error_label.config(text="")
 
@@ -207,22 +218,22 @@ class MainPage(ttk.Frame):
         if self.session.armed:
             remaining = format_remaining(self.session.remaining(time.monotonic()))
             suffix = f"  ·  {remaining} 남음" if remaining else "  ·  무제한"
-            self.status_label.config(text=f"🎧 듣는 중{suffix}", foreground=w.OK)
-            self.toggle_button.config(text="⏹ 듣기 중지")
+            self.status_label.set(f"듣는 중{suffix}", "headphones", theme.OK)
+            self.toggle_button.set_text("듣기 중지", "stop")
             if self.session.stop_reason is not StopReason.TRIGGERED:
                 self.reason_label.config(text="박수 두 번(짝짝)을 기다리는 중…",
-                                         foreground=w.FG_MUTED)
+                                         foreground=theme.FG_MUTED)
         else:
-            self.status_label.config(text="💤 대기 중 · 마이크를 사용하지 않습니다",
-                                     foreground=w.FG_MUTED)
-            self.toggle_button.config(text="🎧 듣기 시작")
-            hint = STOP_MESSAGES.get(self.session.stop_reason, "")
+            self.status_label.set("대기 중 · 마이크를 사용하지 않습니다",
+                                  "standby", theme.FG_MUTED)
+            self.toggle_button.set_text("듣기 시작", "play")
+            message, _icon = STOP_MESSAGES.get(self.session.stop_reason, ("", "standby"))
             if self.settings.auto_arm_on_unlock:
-                hint += "\n화면을 잠갔다 풀면 자동으로 다시 듣습니다."
+                message += "\n화면을 잠갔다 풀면 자동으로 다시 듣습니다."
             self.reason_label.config(
-                text=hint,
-                foreground=w.OK if self.session.stop_reason is StopReason.TRIGGERED
-                else w.FG_MUTED,
+                text=message,
+                foreground=theme.OK if self.session.stop_reason is StopReason.TRIGGERED
+                else theme.FG_MUTED,
             )
 
     def _update_log(self, snapshot) -> None:
@@ -230,19 +241,34 @@ class MainPage(ttk.Frame):
         new_events, dropped = take_new_events(
             snapshot.events, snapshot.event_count, self._shown_events)
         if dropped:
-            self.log.insert(tk.END, f" … {dropped}개 생략됨")
+            self.log.insert(tk.END, f"  … {dropped}개 생략됨")
 
         for event in new_events:
             if event.triggered:
-                text = "🎉 짝짝! 발동"
+                text = "짝짝! 발동"
             elif event.is_clap:
-                text = f"👏 박수 1회  {event.features.describe()}"
+                text = f"박수 1회  {event.features.describe()}"
             else:
                 text = f"·  {event.reject_reason}"
-            self.log.insert(tk.END, f" {text}")
+            self.log.insert(tk.END, f"  {text}")
             self.log.see(tk.END)
         self._shown_events = snapshot.event_count
 
         # 목록이 무한정 길어지지 않게 오래된 줄을 지운다
         while self.log.size() > 200:
             self.log.delete(0)
+
+
+class NeoToggleRow(ttk.Frame):
+    """토글 스위치를 다른 위젯처럼 pack 할 수 있게 감싼 것."""
+
+    def __init__(self, parent, text: str, value: bool, command=None) -> None:
+        super().__init__(parent)
+        from .neumorphic import NeoToggle
+
+        self._toggle = NeoToggle(self, text=text, value=value, command=command)
+        self._toggle.pack(side="left")
+
+    @property
+    def value(self) -> bool:
+        return self._toggle.value

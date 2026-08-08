@@ -14,14 +14,14 @@ from tkinter import ttk
 from ..console import force_utf8_console
 from ..session_lock import LockWatcher, is_session_locked
 from ..settings import Settings, load_settings
-from . import widgets as w
+from . import theme
 from .audio_monitor import AudioMonitor
 from .calibrate_page import CalibratePage
 from .device_page import DevicePage
 from .main_page import MainPage
 
 WINDOW_TITLE = "Clapping Setup"
-WINDOW_SIZE = "600x760"
+WINDOW_SIZE = "620x730"
 UI_REFRESH_MS = 50        # 화면 갱신 주기. 20fps면 막대가 충분히 부드럽다.
 LOCK_POLL_MS = 1500       # 화면 잠금 상태를 확인하는 주기.
 # 1.5초면 충분한 이유: 잠금이 풀린 걸 1초 늦게 알아도 사용자는 아직 자리에 앉는 중이다.
@@ -53,8 +53,8 @@ class ClapLauncherApp(tk.Tk):
 
         self.title(WINDOW_TITLE)
         self.geometry(WINDOW_SIZE)
-        self.minsize(580, 700)
-        self.configure(bg=w.BG)
+        self.minsize(600, 690)
+        self.configure(bg=theme.BG)
         self._setup_styles()
 
         # 창의 X 버튼을 눌렀을 때 오디오 스레드를 정리하고 나가도록 가로챈다.
@@ -90,7 +90,11 @@ class ClapLauncherApp(tk.Tk):
             pass   # 창 띄우기에 실패해도 프로그램이 죽을 이유는 없다
 
     def _setup_styles(self) -> None:
-        """ttk 위젯의 색과 글꼴을 한 번에 정한다."""
+        """ttk 위젯의 색과 글꼴을 한 번에 정한다.
+
+        버튼·토글·패널은 뉴모피즘 부품(neumorphic.py)이 대신하므로,
+        여기서는 글자와 스크롤바처럼 남은 것들만 배경색에 맞춰 준다.
+        """
         style = ttk.Style(self)
         # 'clam' 테마를 쓰는 이유: Windows 기본 테마는 배경색 지정이 잘 먹지 않는다.
         try:
@@ -98,39 +102,22 @@ class ClapLauncherApp(tk.Tk):
         except tk.TclError:
             pass
 
-        style.configure("TFrame", background=w.BG)
-        style.configure("TLabel", background=w.BG, foreground=w.FG, font=w.FONT_BODY)
-        style.configure("Title.TLabel", font=w.FONT_TITLE, foreground=w.FG)
-        style.configure("Muted.TLabel", foreground=w.FG_MUTED, font=w.FONT_BODY)
-        style.configure("Small.TLabel", foreground=w.FG_MUTED, font=w.FONT_SMALL)
-        style.configure("Mono.TLabel", foreground=w.FG, font=w.FONT_MONO)
-        style.configure("Status.TLabel", foreground=w.OK, font=("맑은 고딕", 12, "bold"))
+        style.configure("TFrame", background=theme.BG)
+        style.configure("TLabel", background=theme.BG, foreground=theme.FG,
+                        font=theme.FONT_BODY)
+        style.configure("Title.TLabel", font=theme.FONT_TITLE, foreground=theme.FG)
+        style.configure("Heading.TLabel", font=theme.FONT_HEADING, foreground=theme.FG)
+        style.configure("Muted.TLabel", foreground=theme.FG_MUTED, font=theme.FONT_BODY)
+        style.configure("Small.TLabel", foreground=theme.FG_MUTED, font=theme.FONT_SMALL)
+        style.configure("Mono.TLabel", foreground=theme.FG, font=theme.FONT_MONO)
 
-        style.configure("TLabelframe", background=w.BG, foreground=w.FG_MUTED)
-        style.configure("TLabelframe.Label", background=w.BG, foreground=w.FG_MUTED,
-                        font=w.FONT_SMALL)
+        # 패널 안쪽(움푹 들어간 바닥) 위에 놓이는 글자는 배경색이 다르다
+        style.configure("Sunken.TLabel", background=theme.BG_SUNKEN,
+                        foreground=theme.FG_MUTED, font=theme.FONT_SMALL)
 
-        style.configure("TButton", background=w.BG_PANEL, foreground=w.FG,
-                        font=w.FONT_BODY, borderwidth=0, padding=(12, 7))
-        style.map("TButton", background=[("active", "#3a3d4a")])
-        style.configure("Accent.TButton", background=w.ACCENT, foreground="#ffffff")
-        style.map("Accent.TButton",
-                  background=[("active", "#4a7ae8"), ("disabled", w.BG_PANEL)],
-                  foreground=[("disabled", w.FG_MUTED)])
-
-        style.configure("TScrollbar", background=w.BG_PANEL, troughcolor=w.BG,
-                        borderwidth=0, arrowcolor=w.FG_MUTED)
-
-        style.configure("TCheckbutton", background=w.BG, foreground=w.FG, font=w.FONT_BODY,
-                        focuscolor=w.BG, indicatorbackground=w.BG_PANEL,
-                        indicatorforeground=w.FG, padding=(0, 4))
-        style.map("TCheckbutton",
-                  background=[("active", w.BG)],
-                  indicatorbackground=[("selected", w.ACCENT), ("active", "#3a3d4a")],
-                  indicatorforeground=[("selected", "#ffffff")])
-
-        style.configure("TSpinbox", fieldbackground=w.BG_PANEL, background=w.BG_PANEL,
-                        foreground=w.FG, borderwidth=0, arrowcolor=w.FG_MUTED)
+        style.configure("TScrollbar", background=theme.BG_SUNKEN, troughcolor=theme.BG_SUNKEN,
+                        borderwidth=0, arrowcolor=theme.FG_MUTED)
+        style.map("TScrollbar", background=[("active", theme.DARK)])
 
     # ── 화면 전환 ──────────────────────────────────────────
     def _swap_page(self, page: ttk.Frame) -> None:

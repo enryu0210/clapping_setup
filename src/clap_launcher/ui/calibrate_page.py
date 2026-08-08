@@ -24,19 +24,22 @@ from ..detector.calibration import (
     derive_config,
 )
 from ..settings import save_settings
-from . import widgets as w
+from . import icons, theme
 from .audio_monitor import AudioMonitor, take_new_events
+from .neumorphic import IconLabel, NeoButton, NeoPanel
 
 PHASE_CLAP = "clap"      # 박수 모으는 중
 PHASE_NOISE = "noise"    # 잡음 모으는 중
 PHASE_DONE = "done"      # 계산 끝
+
+PANEL_WIDTH = 520
 
 
 class CalibratePage(ttk.Frame):
     """박수와 잡음을 받아 기준값을 계산하는 화면."""
 
     def __init__(self, parent, monitor: AudioMonitor, settings, on_done) -> None:
-        super().__init__(parent, padding=20)
+        super().__init__(parent, padding=(24, 20))
         self.monitor = monitor
         self.settings = settings
         self.on_done = on_done
@@ -54,40 +57,54 @@ class CalibratePage(ttk.Frame):
 
     # ── 화면 구성 ──────────────────────────────────────────
     def _build(self) -> None:
-        ttk.Label(self, text="🎯 박수 보정", style="Title.TLabel").pack(anchor="w")
-        self.instruction = ttk.Label(self, text="", style="Muted.TLabel",
-                                     justify="left", wraplength=520)
-        self.instruction.pack(anchor="w", pady=(4, 14))
+        header = tk.Canvas(self, width=PANEL_WIDTH, height=38, bg=theme.BG,
+                           highlightthickness=0, bd=0)
+        header.pack(anchor="w")
+        icons.draw(header, "target", 16, 19, 26, theme.ACCENT, width=2)
+        header.create_text(38, 20, text="박수 보정", anchor="w",
+                           fill=theme.FG, font=theme.FONT_TITLE)
 
-        self.progress_label = ttk.Label(self, text="", style="Status.TLabel")
+        self.instruction = ttk.Label(self, text="", style="Muted.TLabel",
+                                     justify="left", wraplength=PANEL_WIDTH)
+        self.instruction.pack(anchor="w", pady=(6, 12))
+
+        self.progress_label = IconLabel(self, width=PANEL_WIDTH, icon="clap", text="",
+                                        color=theme.FG_MUTED, font=theme.FONT_HEADING,
+                                        icon_size=20)
         self.progress_label.pack(anchor="w")
-        self.hint_label = ttk.Label(self, text="", style="Small.TLabel", wraplength=520)
-        self.hint_label.pack(anchor="w", pady=(2, 12))
+        self.hint_label = ttk.Label(self, text="", style="Small.TLabel",
+                                    wraplength=PANEL_WIDTH)
+        self.hint_label.pack(anchor="w", pady=(2, 10))
 
         # 모은 샘플의 값을 그대로 보여준다.
         # 사용자가 "기침이 잘못 들어갔네" 같은 걸 알아챌 수 있어야 하기 때문이다.
-        self.sample_box = ttk.LabelFrame(self, text=" 모은 박수 ", padding=10)
-        self.sample_box.pack(fill="both", expand=True)
+        self.list_caption = ttk.Label(self, text="모은 박수", style="Small.TLabel")
+        self.list_caption.pack(anchor="w", pady=(0, 4))
+
+        panel = NeoPanel(self, width=PANEL_WIDTH, height=130, padding=10)
+        panel.pack(anchor="w")
         self.sample_list = tk.Listbox(
-            self.sample_box, height=6, activestyle="none",
-            bg=w.BG_PANEL, fg=w.FG, highlightthickness=0, bd=0, font=w.FONT_MONO,
-            selectbackground=w.BG_PANEL, selectforeground=w.FG,
+            panel.body, activestyle="none", bg=theme.BG_SUNKEN, fg=theme.FG,
+            highlightthickness=0, bd=0, font=theme.FONT_MONO,
+            selectbackground=theme.BG_SUNKEN, selectforeground=theme.FG,
         )
         self.sample_list.pack(fill="both", expand=True)
 
-        self.result_label = ttk.Label(self, text="", style="Muted.TLabel", wraplength=520,
-                                      justify="left")
-        self.result_label.pack(anchor="w", pady=(12, 8))
+        self.result_label = ttk.Label(self, text="", style="Muted.TLabel",
+                                      wraplength=PANEL_WIDTH, justify="left")
+        self.result_label.pack(anchor="w", pady=(10, 8))
 
         row = ttk.Frame(self)
-        row.pack(fill="x")
-        self.primary_button = ttk.Button(row, text="저장하고 적용", command=self._save,
-                                         state="disabled", style="Accent.TButton")
+        row.pack(anchor="w")
+        self.primary_button = NeoButton(row, text="저장하고 적용", icon="check",
+                                        command=self._save, accent=True)
         self.primary_button.pack(side="left")
-        self.undo_button = ttk.Button(row, text="↶ 마지막 지우기", command=self._undo)
-        self.undo_button.pack(side="left", padx=8)
-        ttk.Button(row, text="다시 하기", command=self.restart).pack(side="left")
-        ttk.Button(row, text="취소", command=self._cancel).pack(side="left", padx=8)
+        self.undo_button = NeoButton(row, text="마지막 지우기", icon="undo",
+                                     command=self._undo)
+        self.undo_button.pack(side="left")
+        NeoButton(row, text="다시 하기", icon="refresh",
+                  command=self.restart).pack(side="left")
+        NeoButton(row, text="취소", icon="close", command=self._cancel).pack(side="left")
 
     # ── 단계 진행 ─────────────────────────────────────────
     def restart(self) -> None:
@@ -99,13 +116,14 @@ class CalibratePage(ttk.Frame):
         self._ignored = 0
         self.result = None
         self.result_label.config(text="")
-        self.primary_button.config(state="disabled", text="저장하고 적용")
-        self.undo_button.config(state="normal")
-        self.sample_box.config(text=" 모은 박수 ")
+        self.primary_button.configure_state(False)
+        self.primary_button.set_text("저장하고 적용", "check")
+        self.undo_button.configure_state(True)
+        self.list_caption.config(text="모은 박수")
         self.instruction.config(
             text="1단계 — 이 마이크로 친 진짜 박수를 기준으로 삼습니다.\n"
                  "평소 치던 대로, 0.5초 이상 간격을 두고 천천히 쳐주세요.",
-            foreground=w.FG_MUTED,
+            foreground=theme.FG_MUTED,
         )
         self._start_listening()
         self._refresh_progress()
@@ -119,15 +137,16 @@ class CalibratePage(ttk.Frame):
         """2단계: 배제해야 할 소리를 모은다."""
         self.phase = PHASE_NOISE
         self._noise_started_at = time.monotonic()
-        self.sample_box.config(text=" 모은 잡음 (배제할 소리) ")
+        self.list_caption.config(text="모은 잡음 (배제할 소리)")
         self.sample_list.delete(0, tk.END)
-        self.undo_button.config(state="disabled")
-        self.primary_button.config(state="normal", text="⏭ 건너뛰고 마치기")
+        self.undo_button.configure_state(False)
+        self.primary_button.configure_state(True)
+        self.primary_button.set_text("건너뛰고 마치기", "play")
         self.instruction.config(
             text="2단계 — 이번엔 '박수가 아닌 소리'를 알려줄 차례입니다.\n"
                  "평소처럼 타이핑하거나, 마우스를 클릭하거나, 책상을 두드려 주세요.\n"
                  "여기서 모은 소리는 앞으로 무시하도록 기준을 잡습니다.",
-            foreground=w.ACCENT,
+            foreground=theme.ACCENT,
         )
         self._refresh_progress()
 
@@ -148,7 +167,7 @@ class CalibratePage(ttk.Frame):
         snapshot = self.monitor.snapshot()
 
         if snapshot.error:
-            self.hint_label.config(text=f"❌ {snapshot.error}", foreground=w.ERROR)
+            self.hint_label.config(text=snapshot.error, foreground=theme.ERROR)
             return
 
         if self.phase == PHASE_DONE:
@@ -199,33 +218,34 @@ class CalibratePage(ttk.Frame):
         if self.phase == PHASE_CLAP:
             done = len(self.samples)
             dots = "●" * done + "○" * max(0, REQUIRED_SAMPLES - done)
-            self.progress_label.config(text=f"{dots}  박수 {done} / {REQUIRED_SAMPLES}",
-                                       foreground=w.OK if done else w.FG_MUTED)
+            self.progress_label.set(f"{dots}   박수 {done} / {REQUIRED_SAMPLES}",
+                                    "clap", theme.OK if done else theme.FG_MUTED)
             extra = f"  (작아서 무시한 소리 {self._ignored}개)" if self._ignored else ""
-            self.hint_label.config(text=f"박수를 쳐주세요…{extra}", foreground=w.FG_MUTED)
+            self.hint_label.config(text=f"박수를 쳐주세요…{extra}", foreground=theme.FG_MUTED)
         elif self.phase == PHASE_NOISE:
-            self.progress_label.config(
-                text=f"⏱ {remaining:.0f}초 남음   ·   모은 소리 {len(self.noise)}개",
-                foreground=w.ACCENT,
-            )
+            self.progress_label.set(
+                f"{remaining:.0f}초 남음   ·   모은 소리 {len(self.noise)}개",
+                "clock", theme.ACCENT)
             self.hint_label.config(text="타이핑·클릭 등 평소 나는 소리를 내주세요…",
-                                   foreground=w.FG_MUTED)
+                                   foreground=theme.FG_MUTED)
 
     # ── 마무리 ────────────────────────────────────────────
     def _finish(self) -> None:
         """다 모았다. 기준값을 계산해서 보여준다."""
         self.phase = PHASE_DONE
         self.monitor.stop()      # 더 받을 필요가 없으니 마이크를 놓아준다
-        self.progress_label.config(text="✅ 보정 완료", foreground=w.OK)
         self.hint_label.config(text="")
         self.instruction.config(text="아래 기준값이 이 마이크에 맞춰 계산됐습니다.",
-                                foreground=w.FG_MUTED)
+                                foreground=theme.FG_MUTED)
 
         try:
             self.result = derive_config(self.samples, self.noise)
         except ValueError as exc:
-            self.result_label.config(text=f"❌ {exc}", foreground=w.ERROR)
+            self.progress_label.set("보정 실패", "warning", theme.ERROR)
+            self.result_label.config(text=str(exc), foreground=theme.ERROR)
             return
+
+        self.progress_label.set("보정 완료", "check", theme.OK)
 
         config = self.result.config
         lines = [
@@ -240,17 +260,16 @@ class CalibratePage(ttk.Frame):
         if self.result.noise_count:
             blocked = self.result.rejected_noise
             total = self.result.noise_count
-            mark = "✅" if blocked == total else "⚠️"
-            lines.append(f"\n{mark} 모은 잡음 {total}개 중 {blocked}개를 막아냅니다.")
-
+            lines.append(f"\n모은 잡음 {total}개 중 {blocked}개를 막아냅니다.")
         for warning in self.result.warnings:
-            lines.append(f"\n⚠️ {warning}")
+            lines.append(f"\n· {warning}")
 
         self.result_label.config(
             text="\n".join(lines),
-            foreground=w.WARN if self.result.warnings else w.FG_MUTED,
+            foreground=theme.WARN if self.result.warnings else theme.FG_MUTED,
         )
-        self.primary_button.config(state="normal", text="저장하고 적용")
+        self.primary_button.set_text("저장하고 적용", "check")
+        self.primary_button.configure_state(True)
 
     def _save(self) -> None:
         """2단계 중이면 건너뛰고 마무리, 끝났으면 저장하고 돌아간다."""
@@ -266,7 +285,7 @@ class CalibratePage(ttk.Frame):
         except OSError as exc:
             # 저장에 실패해도 이번 실행에는 적용된다. 다음 실행 때 다시 보정하면 된다.
             self.result_label.config(
-                text=f"⚠️ 저장하지 못했습니다({exc}). 이번 실행에만 적용됩니다.",
-                foreground=w.WARN,
+                text=f"저장하지 못했습니다({exc}). 이번 실행에만 적용됩니다.",
+                foreground=theme.WARN,
             )
         self.on_done()
