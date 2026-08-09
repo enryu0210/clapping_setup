@@ -26,8 +26,19 @@ SRC = ROOT / "src"
 ICON = ROOT / "assets" / "icon.ico"
 
 
-def build_args() -> list[str]:
-    """PyInstaller 에 넘길 옵션. 각 줄이 왜 필요한지가 이 함수의 핵심이다."""
+def build_args(onedir: bool = False) -> list[str]:
+    """PyInstaller 에 넘길 옵션. 각 줄이 왜 필요한지가 이 함수의 핵심이다.
+
+    Args:
+        onedir: True 면 폴더 형태로 만든다 (설치본에 넣을 때 쓴다).
+
+    onefile 과 onedir 의 차이:
+      onefile — 파일 하나라 USB 에 넣어 다니기 좋다. 대신 실행할 때마다 31MB 를
+                임시 폴더에 풀어서 **첫 실행이 1~2초 느리고**, 자가 압축 해제가
+                백신 눈에 수상하게 보이기도 한다.
+      onedir  — 폴더 통째라 배포는 번거롭지만 **즉시 뜬다.** 설치본이 폴더를 대신
+                옮겨주므로 설치형에서는 이쪽이 맞다.
+    """
     # 데이터 파일 구분자는 OS마다 다르다 (Windows ';', 그 외 ':')
     sep = ";" if sys.platform == "win32" else ":"
 
@@ -38,9 +49,7 @@ def build_args() -> list[str]:
         # 진입점이 tools/ 에 있으므로 패키지가 있는 src/ 를 따로 알려준다
         "--paths", str(SRC),
 
-        # 파일 하나로 배포한다. 받는 사람이 폴더째 옮길 필요가 없다.
-        # (대신 실행할 때마다 임시 폴더에 풀어서 첫 실행이 1~2초 느리다)
-        "--onefile",
+        "--onedir" if onedir else "--onefile",
 
         # 콘솔 창을 띄우지 않는다. GUI 앱이 검은 창을 달고 뜨면 완성도가 떨어져 보인다.
         # ⚠️ 이 모드에서는 sys.stdout 이 없다. print() 가 죽지 않는지 확인해야 한다
@@ -87,28 +96,50 @@ def _excludes() -> list[str]:
     return args
 
 
-def main() -> int:
+def output_path(onedir: bool = False) -> Path:
+    """만들어질 exe 의 경로. onedir 이면 폴더 안에 들어간다."""
+    base = ROOT / "dist"
+    return base / APP_NAME / f"{APP_NAME}.exe" if onedir else base / f"{APP_NAME}.exe"
+
+
+def build(onedir: bool = False) -> Path | None:
+    """실제 빌드. 성공하면 만들어진 exe 경로, 실패하면 None."""
     if not ICON.is_file():
         print(f"❌ 아이콘이 없습니다: {ICON}\n   먼저 python tools/make_icon.py 를 실행하세요.",
               file=sys.stderr)
-        return 1
+        return None
 
     try:
         import PyInstaller.__main__
     except ImportError:
         print("❌ PyInstaller 가 없습니다.\n   pip install pyinstaller", file=sys.stderr)
-        return 1
+        return None
 
     # 예전 결과물이 남아 있으면 '빌드가 실패했는데 성공한 줄 아는' 사고가 난다
-    target = ROOT / "dist" / f"{APP_NAME}.exe"
+    target = output_path(onedir)
     if target.exists():
-        target.unlink()
+        try:
+            target.unlink()
+        except OSError as exc:
+            # onefile 빌드는 자식 프로세스로 돌기 때문에, 부모만 종료하면 exe 가 잠긴 채 남는다
+            print(f"❌ 이전 exe 를 지울 수 없습니다({exc}).\n"
+                  f"   실행 중인 {APP_NAME} 를 모두 종료한 뒤 다시 시도하세요.", file=sys.stderr)
+            return None
 
-    print(f"빌드를 시작합니다. 몇 분 걸립니다…\n  진입점: {ENTRY.relative_to(ROOT)}")
-    PyInstaller.__main__.run(build_args())
+    mode = "폴더(onedir)" if onedir else "단일 파일(onefile)"
+    print(f"빌드를 시작합니다. 몇 분 걸립니다…\n  방식: {mode}\n"
+          f"  진입점: {ENTRY.relative_to(ROOT)}")
+    PyInstaller.__main__.run(build_args(onedir))
 
     if not target.is_file():
         print("\n❌ exe 가 만들어지지 않았습니다. 위 로그를 확인하세요.", file=sys.stderr)
+        return None
+    return target
+
+
+def main(onedir: bool = False) -> int:
+    target = build(onedir)
+    if target is None:
         return 1
 
     size_mb = target.stat().st_size / 1024 / 1024
@@ -131,4 +162,6 @@ def clean() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(clean() if "--clean-only" in sys.argv else main())
+    if "--clean-only" in sys.argv:
+        raise SystemExit(clean())
+    raise SystemExit(main(onedir="--onedir" in sys.argv))

@@ -48,7 +48,11 @@ clapping_setup/
 ├── tools/                      🔧 개발용 스크립트
 │   ├── make_icon.py            아이콘 생성 (색이 바뀌면 다시 돌린다)
 │   ├── build_exe.py            배포용 exe 빌드 (옵션마다 이유를 적어 뒀다)
+│   ├── build_installer.py      설치본 빌드 (onedir 굽기 + Inno Setup)
 │   └── entry_point.py          exe 전용 진입점 (상대 import 문제 회피)
+│
+├── installer/                  📦 설치본
+│   └── ClapDesk.iss            Inno Setup 스크립트
 │
 ├── docs/                       📄 문서
 │   ├── PLAN.md                 계획서 (목표·리스크·마일스톤)

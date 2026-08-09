@@ -14,6 +14,7 @@ from clap_launcher.config import CONFIG_ENV_VAR, AppEntry
 from clap_launcher.launcher.app_launcher import LaunchResult
 from clap_launcher.listening import StopReason
 from clap_launcher.settings import Settings
+from clap_launcher.ui import theme
 from clap_launcher.ui.audio_monitor import MonitorSnapshot
 
 GOOD_CONFIG = """
@@ -68,10 +69,12 @@ def make_page(root, tmp_path, monkeypatch):
     """
     made = []
 
-    def _make(config_text: str = GOOD_CONFIG):
+    def _make(config_text: str | None = GOOD_CONFIG):
+        """config_text=None 이면 설정 파일 자체를 만들지 않는다 (갓 설치한 상태)."""
         path = tmp_path / "apps.yaml"
-        path.write_text(config_text, encoding="utf-8")
-        monkeypatch.setenv(CONFIG_ENV_VAR, str(path))
+        if config_text is not None:
+            path.write_text(config_text, encoding="utf-8")
+            monkeypatch.setenv(CONFIG_ENV_VAR, str(path))
 
         from clap_launcher.ui.main_page import MainPage
 
@@ -95,6 +98,22 @@ class TestStartup:
         """⭐ 박수를 친 순간에 '설정이 없다'고 하면 가장 김이 새는 순간에 김이 샌다."""
         page, _monitor = make_page("apps:\n  - name: 이름만있음\n")
         assert "path" in page.launch_label.cget("text")
+
+    def test_설정_파일이_아직_없는_것은_오류가_아니다(self, make_page, tmp_path, monkeypatch):
+        """⭐ 갓 설치한 사람의 정상적인 상태다.
+
+        이걸 오류로 다루면 첫 실행 화면에 빨간 경고가 **계속 떠 있는다.**
+        실제로 그렇게 배포됐고, 사용자가 스크린샷을 찍어 보내왔다.
+        """
+        monkeypatch.setenv(CONFIG_ENV_VAR, str(tmp_path / "아직없는파일.yaml"))
+        page, _monitor = make_page(config_text=None)
+
+        text = page.launch_label.cget("text")
+        assert "찾지 못했습니다" not in text        # 파일 경로 나열도 하지 않는다
+        assert "프로그램 설정" in text              # 다음에 할 일을 알려준다
+        # ⚠️ Tk 는 파이썬 str 이 아닌 Tcl 문자열을 준다. str() 로 감싸지 않으면
+        #    비교가 항상 참이 되어 **통과하는 척하는 테스트**가 된다.
+        assert str(page.launch_label.cget("foreground")) != theme.ERROR
 
     def test_켜자마자_듣기를_시작한다(self, make_page):
         _page, monitor = make_page()
@@ -173,4 +192,11 @@ class TestLaunch:
 
         page.launch_apps()      # 예외가 새어 나오면 창이 통째로 죽는다
 
-        assert "설정 파일" in page.launch_label.cget("text")
+        # 파일이 없어진 것은 '등록된 게 없는' 상태와 같다. 겁주지 않고 할 일을 알려준다.
+        assert "프로그램 설정" in page.launch_label.cget("text")
+
+    def test_설정이_깨진_경우에는_빨간_경고를_띄운다(self, make_page):
+        """⭐ '아직 등록 안 함'과 '설정이 깨짐'은 다르다. 후자만 경고여야 한다."""
+        page, _monitor = make_page("apps:\n  - name: 경로없음\n")
+        page.launch_apps()
+        assert str(page.launch_label.cget("foreground")) == theme.ERROR

@@ -49,20 +49,33 @@
 
 ## 빠른 시작 — 그냥 쓰고 싶다면
 
-**`ClapDesk.exe` 하나만 있으면 됩니다.** 파이썬을 깔 필요가 없습니다.
+**파이썬을 깔 필요가 없습니다.** 파이썬·필요한 라이브러리·오디오 드라이버가 전부
+프로그램 안에 들어 있습니다.
 
-1. `ClapDesk.exe` 를 아무 폴더에 두고 더블클릭
+| 방식 | 파일 | 이럴 때 |
+|------|------|---------|
+| **설치본** | `ClapDesk-Setup-1.0.0.exe` (23MB) | 계속 쓸 PC에. 시작 메뉴 바로가기·제거 프로그램·자동 실행 설정이 함께 |
+| **단일 파일** | `ClapDesk.exe` (31MB) | 설치 없이. USB에 넣어 들고 다니기 |
+
+1. 둘 중 하나를 실행
 2. 마이크를 고르고 → `[≡ 프로그램 설정]` 에서 실행할 프로그램 등록
 3. 끝. 창을 닫아도 트레이에서 계속 돕니다
 
-> 설정은 **exe 옆의 `config/apps.yaml`** 에 저장됩니다. USB에 넣어 들고 다녀도 설정이 따라옵니다.
-> (쓰기 금지 폴더에 두면 `%LOCALAPPDATA%\ClapDesk\` 로 물러섭니다)
+> 설정은 **프로그램 옆의 `config/apps.yaml`** 에 저장됩니다.
+> 설치본은 관리자 권한 없이 사용자 폴더에 설치하므로 이 파일을 그대로 쓸 수 있습니다.
+> (쓰기가 막힌 위치라면 `%LOCALAPPDATA%\ClapDesk\` 로 물러섭니다)
 
-### exe 직접 만들기
+> 💡 **단일 파일은 실행할 때마다 31MB를 임시 폴더에 풀기 때문에 첫 실행이 1~2초 느립니다.**
+> 설치본은 폴더 형태라 즉시 뜹니다. 자동 실행으로 쓸 거라면 설치본이 낫습니다.
+
+### 직접 만들기
 
 ```powershell
 pip install pyinstaller
-python tools/build_exe.py      # → dist/ClapDesk.exe (약 21MB)
+python tools/build_exe.py              # → dist/ClapDesk.exe (단일 파일)
+
+winget install JRSoftware.InnoSetup    # 설치본을 만들려면 (처음 한 번만)
+python tools/build_installer.py        # → dist/ClapDesk-Setup-1.0.0.exe
 ```
 
 빌드 옵션은 `tools/build_exe.py` 안에 **왜 필요한지와 함께** 적어 뒀습니다.
@@ -296,6 +309,7 @@ python tools/make_icon.py     # assets/icon.ico, icon.png, icon_preview.png 를 
 | M5 | 트레이 상주·중복 실행 방지·자동 시작 | ✅ |
 | M5.5 | 이름(ClapDesk)·아이콘 정하기 | ✅ |
 | M6 | exe 패키징 (PyInstaller) | ✅ |
+| M6.5 | 설치본 (Inno Setup) | ✅ |
 
 ## 환경
 

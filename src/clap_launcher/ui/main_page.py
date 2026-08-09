@@ -19,7 +19,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from .. import autostart
-from ..config import ConfigError, DetectionConfig, load_config
+from ..config import ConfigError, DetectionConfig, find_config_path, load_config
 from ..launcher.app_launcher import AppLauncher
 from ..listening import ListeningSession, StopReason, format_remaining
 from ..settings import save_settings
@@ -277,11 +277,21 @@ class MainPage(ttk.Frame):
 
     # ── 프로그램 실행 ──────────────────────────────────────
     def _load_apps(self):
-        """설정 파일에서 실행 목록을 읽는다. 실패하면 (None, 안내문)을 돌려준다.
+        """설정 파일에서 실행 목록을 읽는다.
+
+        Returns:
+            (실행할 항목들, 오류 안내문). 오류가 없으면 안내문은 빈 문자열이고,
+            **진짜 오류일 때만** 항목이 None 이 된다.
+
+        ⚠️ 설정 파일이 아직 없는 것은 오류가 아니다. 갓 설치한 사람의 정상적인 상태다.
+           이걸 오류로 다루면 첫 실행 화면에 빨간 경고가 계속 떠 있게 된다
+           (실제로 그런 상태로 배포됐다). '아직 등록 안 함'과 '설정이 깨짐'은 다르다.
 
         박수를 칠 때마다 다시 읽는 이유: apps.yaml 을 고친 뒤 프로그램을 껐다 켜야 한다면
         설정을 손보는 과정이 너무 번거롭다. 파일 읽기는 순식간이라 부담도 없다.
         """
+        if find_config_path() is None:
+            return [], ""          # 아직 등록한 적이 없다 — 정상적인 첫 실행 상태
         try:
             return load_config().enabled_apps, ""
         except ConfigError as exc:
@@ -291,10 +301,12 @@ class MainPage(ttk.Frame):
         """지금 설정대로면 무엇이 실행되는지 미리 보여준다."""
         apps, error = self._load_apps()
         if apps is None:
+            # 설정 파일이 있는데 잘못된 경우 — 이건 진짜 알려야 할 문제다
             self.launch_label.config(text=f"⚠ {error}", foreground=theme.ERROR)
         elif not apps:
+            # 겁주지 않고 다음에 할 일을 알려준다
             self.launch_label.config(
-                text="실행할 프로그램이 없습니다. config/apps.yaml 의 apps 목록을 채워주세요.",
+                text="아직 등록된 프로그램이 없습니다 — [프로그램 설정]에서 추가하세요.",
                 foreground=theme.FG_MUTED)
         else:
             names = ", ".join(app.name for app in apps)
@@ -311,7 +323,7 @@ class MainPage(ttk.Frame):
             return
         if not apps:
             self.launch_label.config(
-                text="박수는 감지했지만 실행할 프로그램이 없습니다. config/apps.yaml 을 확인하세요.",
+                text="박수는 감지했지만 실행할 프로그램이 없습니다 — [프로그램 설정]에서 추가하세요.",
                 foreground=theme.WARN)
             return
 
