@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..config import AppEntry
+from .running_apps import is_already_running, list_running_processes
 
 
 class LaunchError(Exception):
@@ -30,6 +31,7 @@ class LaunchResult:
     succeeded: list[str] = field(default_factory=list)              # 성공한 앱 이름
     failed: list[tuple[str, str]] = field(default_factory=list)     # (앱 이름, 실패 이유)
     skipped: int = 0                                                # enabled: false 로 건너뛴 개수
+    already_running: list[str] = field(default_factory=list)        # 이미 켜져 있어 건너뛴 것
 
     @property
     def ok(self) -> bool:
@@ -41,12 +43,16 @@ class LaunchResult:
         실패한 것이 있으면 **이름과 이유를 반드시 함께** 보여준다.
         "1개 실패"만 알려주면 사용자는 무엇을 고쳐야 할지 알 수 없다.
         """
-        if not self.succeeded and not self.failed:
+        if not self.succeeded and not self.failed and not self.already_running:
             return "실행할 프로그램이 없습니다."
 
         parts = [f"성공 {len(self.succeeded)}개"]
         if self.failed:
             parts.append(f"실패 {len(self.failed)}개")
+        if self.already_running:
+            # '아무 일도 안 일어났다'가 아니라 '이미 켜져 있었다'임을 알려준다.
+            # 이 말이 없으면 사용자는 프로그램이 고장 난 줄 안다.
+            parts.append(f"이미 켜져 있음 {len(self.already_running)}개")
         if self.skipped:
             parts.append(f"꺼둔 항목 {self.skipped}개")
         text = " / ".join(parts)
@@ -160,16 +166,30 @@ class AppLauncher:
        테스트를 돌릴 수가 없다. 가짜 실행기를 넣어 '무엇을 어떤 순서로 실행했는지'만 본다.
     """
 
-    def __init__(self, launchers: dict | None = None, sleep=time.sleep) -> None:
+    def __init__(self, launchers: dict | None = None, sleep=time.sleep,
+                 running_lookup=list_running_processes) -> None:
         self._launchers = DEFAULT_LAUNCHERS if launchers is None else launchers
         self._sleep = sleep
+        self._running_lookup = running_lookup
 
     def launch_all(self, apps: list[AppEntry]) -> LaunchResult:
-        """enabled 인 항목만, 목록 순서대로 실행하고 delay 만큼 쉬어간다."""
+        """enabled 인 항목만, 목록 순서대로 실행하고 delay 만큼 쉬어간다.
+
+        이미 켜져 있는 프로그램은 건너뛴다(skip_if_running). 아침에 켠 뒤 점심때 또
+        박수를 쳤다고 VS Code 창이 하나 더 뜨면 곤란하기 때문이다.
+        """
         targets = [app for app in apps if app.enabled]
         result = LaunchResult(skipped=len(apps) - len(targets))
 
+        # 프로세스 목록은 **한 번만** 읽는다. 항목마다 읽으면 8개 실행에 8번 훑게 된다.
+        # 실행하는 동안 목록이 바뀌긴 하지만, 방금 켠 것을 또 켤 일은 없으므로 문제없다.
+        running = self._running_lookup() if self._needs_running_check(targets) else set()
+
         for order, entry in enumerate(targets):
+            if self._should_skip(entry, running):
+                result.already_running.append(entry.name)
+                continue      # 아무것도 안 켰으니 delay 만큼 쉴 이유도 없다
+
             self._launch_one(entry, result)
 
             # 마지막 항목 뒤에는 기다릴 이유가 없다 (괜히 화면 복귀만 늦어진다)
@@ -178,6 +198,25 @@ class AppLauncher:
                 self._sleep(entry.delay)
 
         return result
+
+    @staticmethod
+    def _needs_running_check(targets: list[AppEntry]) -> bool:
+        """중복 검사가 필요한 항목이 하나라도 있는가.
+
+        전부 웹 주소·폴더뿐이면 프로세스 목록을 읽을 이유가 없다(읽는 데 시간이 든다).
+        """
+        return any(app.type == "exe" and app.skip_if_running for app in targets)
+
+    @staticmethod
+    def _should_skip(entry: AppEntry, running: set[str]) -> bool:
+        """이미 켜져 있어서 건너뛸 항목인가.
+
+        ⚠️ exe 만 검사한다. 웹 주소·폴더는 '켜져 있다'는 개념이 애매하고
+           (탭을 하나 더 여는 게 자연스럽다), 스토어 앱은 실행파일 이름을 알 수 없다.
+        """
+        if entry.type != "exe" or not entry.skip_if_running:
+            return False
+        return is_already_running(entry.path, running)
 
     def _launch_one(self, entry: AppEntry, result: LaunchResult) -> None:
         """항목 하나를 실행하고 결과를 result 에 적는다. **여기서 예외가 새어 나가면 안 된다.**"""

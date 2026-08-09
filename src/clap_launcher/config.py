@@ -117,6 +117,10 @@ class AppEntry:
     args: list[str] = field(default_factory=list)
     delay: float = 0.0                     # 실행 후 다음 항목까지 대기 초
     enabled: bool = True                   # false면 건너뜀 (지우지 않고 잠깐 끄기용)
+    # 이미 켜져 있으면 건너뛸지. 기본값이 True 인 이유: 아침에 켠 뒤 점심때 또 박수를
+    # 쳤다고 같은 창이 하나 더 뜨는 건 대부분의 경우 원하는 동작이 아니다.
+    # 브라우저처럼 창을 하나 더 띄우고 싶은 항목만 false 로 두면 된다. (exe 에만 해당)
+    skip_if_running: bool = True
 
 
 @dataclass
@@ -366,7 +370,9 @@ def _parse_app_entry(raw, order: int) -> AppEntry:
         type=app_type,
         args=_parse_args(raw.get("args"), name),
         delay=_parse_delay(raw.get("delay"), name),
-        enabled=_parse_enabled(raw.get("enabled"), name),
+        enabled=_parse_flag(raw.get("enabled"), name, "enabled", default=True),
+        skip_if_running=_parse_flag(raw.get("skip_if_running"), name,
+                                    "skip_if_running", default=True),
     )
 
 
@@ -402,12 +408,12 @@ def _parse_delay(raw, name: str) -> float:
     return float(raw)
 
 
-def _parse_enabled(raw, name: str) -> bool:
-    """enabled: false 면 지우지 않고 잠시 꺼둘 수 있다."""
+def _parse_flag(raw, name: str, key: str, default: bool) -> bool:
+    """true/false 항목 하나. enabled, skip_if_running 처럼 같은 검사가 반복돼서 묶었다."""
     if raw is None:
-        return True
+        return default
     if not isinstance(raw, bool):
-        raise ConfigError(f"'{name}' 의 enabled 는 true 또는 false 여야 합니다. 지금 값: {raw!r}")
+        raise ConfigError(f"'{name}' 의 {key} 는 true 또는 false 여야 합니다. 지금 값: {raw!r}")
     return raw
 
 
@@ -478,6 +484,8 @@ def _app_to_dict(app: AppEntry) -> dict:
         data["delay"] = app.delay
     if not app.enabled:
         data["enabled"] = False
+    if not app.skip_if_running:
+        data["skip_if_running"] = False
     return data
 
 

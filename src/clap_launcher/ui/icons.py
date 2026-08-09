@@ -395,6 +395,35 @@ class _PilCanvas:
         return 0
 
 
+def render_image(name: str, box: int, color: str, width: int = 2):
+    """아이콘을 Pillow 이미지로 그린다.
+
+    Tk 바깥에서도 쓸 수 있게 따로 뒀다 — 트레이 아이콘(tray.py)이 이걸 쓴다.
+    (트레이는 Tk 위젯이 아니라 순수한 이미지를 요구한다)
+
+    Args:
+        box: 결과 이미지의 한 변 길이. 아이콘은 선 두께만큼 여백을 두고 그 안에 그려진다.
+
+    Returns:
+        RGBA 이미지 (배경 투명). Pillow가 없거나 실패하면 None.
+    """
+    if not _HAS_PIL or name not in _ICONS or box < 4:
+        return None
+
+    # 크게 그린 뒤 줄인다. 선 두께의 절반이 밖으로 삐져나가 잘리지 않도록 여백을 둔다.
+    canvas_size = box * SUPERSAMPLE
+    icon_size = (box - width * 2) * SUPERSAMPLE
+    image = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
+
+    center = canvas_size / 2
+    try:
+        _ICONS[name](_PilCanvas(ImageDraw.Draw(image)), center, center, icon_size,
+                     color, width * SUPERSAMPLE)
+        return image.resize((box, box), Image.LANCZOS)
+    except Exception:
+        return None      # 아이콘은 장식이다. 실패해도 프로그램이 죽을 이유는 없다
+
+
 def _icon_photo(name: str, size: int, color: str, width: int):
     """아이콘 하나를 부드러운 이미지로 만든다. 이미 만든 것은 그대로 재사용한다.
 
@@ -408,20 +437,14 @@ def _icon_photo(name: str, size: int, color: str, width: int):
     if key in _PHOTO_CACHE:
         return _PHOTO_CACHE[key]
 
-    big = size * SUPERSAMPLE
-    # 여백을 조금 둔다. 선 두께의 절반이 정사각형 밖으로 삐져나가면 잘리기 때문이다.
-    margin = width * SUPERSAMPLE
-    canvas_size = big + margin * 2
-    image = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
-
-    center = canvas_size / 2
+    image = render_image(name, size + width * 2, color, width)
+    if image is None:
+        return None
     try:
-        _ICONS[name](_PilCanvas(ImageDraw.Draw(image)), center, center, big,
-                     color, width * SUPERSAMPLE)
-        small = image.resize((size + width * 2, size + width * 2), Image.LANCZOS)
-        photo = ImageTk.PhotoImage(small)
+        photo = ImageTk.PhotoImage(image)
     except Exception:
-        # 아이콘은 장식이다. 만들다 실패하면 캔버스에 직접 그리는 길로 물러선다.
+        # Tk에 이미지를 올리지 못하는 상황(창이 아직 없는 등).
+        # 캔버스에 직접 그리는 길로 물러선다.
         return None
 
     _PHOTO_CACHE[key] = photo

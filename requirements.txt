@@ -1,14 +1,13 @@
-# 실행에 필요한 라이브러리 목록은 pyproject.toml 의 [project].dependencies 한 곳에만 둡니다.
-# 두 군데에 적으면 반드시 한쪽이 낡습니다. 여기서는 그것을 그대로 끌어다 씁니다.
+# 실행에 필요한 라이브러리 목록은 pyproject.toml 의 [project].dependencies 에 있습니다.
+# 이 파일은 `pip install -r requirements.txt` 로 개발 환경을 한 번에 갖추기 위한 것이고,
+# 아래 -e . 한 줄이 그 목록을 그대로 끌어옵니다.
+#
 #   sounddevice : 마이크 입력 (Windows에서 wheel로 바로 설치됨. PyAudio는 빌드 이슈가 잦아 제외)
 #   numpy       : 음량(RMS)·주파수(FFT) 계산
-#   PyYAML      : 설정 파일 읽기 (JSON과 달리 주석을 쓸 수 있어서 선택)
-#   Pillow      : 뉴모피즘 UI의 부드러운 그림자 생성 (Tkinter엔 그림자 기능이 없다)
+#   PyYAML      : 설정 파일 읽기·쓰기 (JSON과 달리 주석을 쓸 수 있어서 선택)
+#   Pillow      : 뉴모피즘 그림자 + 아이콘 안티앨리어싱 (Tkinter에는 둘 다 없다)
+#   pystray     : 시스템 트레이 아이콘 (M5)
 -e .
-
-# ── 트레이 아이콘 단계(M5)에서 사용 ── 아직 구현 전이라 주석 처리
-# pystray>=0.19
-# Pillow>=10.0
 
 # ── 개발용 ──
 pytest>=8.0

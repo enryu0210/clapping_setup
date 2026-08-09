@@ -18,6 +18,7 @@ import time
 import tkinter as tk
 from tkinter import ttk
 
+from .. import autostart
 from ..config import ConfigError, DetectionConfig, load_config
 from ..launcher.app_launcher import AppLauncher
 from ..listening import ListeningSession, StopReason, format_remaining
@@ -117,12 +118,20 @@ class MainPage(ttk.Frame):
         self.error_label.pack(anchor="w")
 
     def _build_options(self) -> None:
-        """언제 들을지에 대한 설정 두 가지."""
+        """언제 들을지에 대한 설정들."""
         self.auto_arm_toggle = NeoToggleRow(
             self, text="화면 잠금을 풀면 자동으로 듣기 시작",
             value=self.settings.auto_arm_on_unlock, command=self._save_options,
         )
         self.auto_arm_toggle.pack(anchor="w", pady=(theme.px(6), 0))
+
+        # ⚠️ 이 토글의 진짜 상태는 settings.json 이 아니라 Windows 레지스트리다.
+        #    (사용자가 작업 관리자에서 직접 끌 수도 있어서) 화면을 열 때마다 실제 값을 읽는다.
+        self.autostart_toggle = NeoToggleRow(
+            self, text="Windows 시작할 때 자동 실행 (트레이에서 조용히 시작)",
+            value=autostart.is_enabled(), command=self._save_autostart,
+        )
+        self.autostart_toggle.pack(anchor="w")
 
         row = ttk.Frame(self)
         row.pack(anchor="w", pady=(theme.px(2), theme.px(4)))
@@ -179,6 +188,21 @@ class MainPage(ttk.Frame):
             save_settings(self.settings)
         except OSError:
             pass   # 저장 실패는 이번 실행에 영향이 없다. 굳이 화면을 어지럽히지 않는다.
+
+    def _save_autostart(self) -> None:
+        """자동 실행 등록/해제. 실패하면 토글을 원래대로 되돌린다.
+
+        되돌리는 이유: 켜진 것처럼 보이는데 실제로는 등록이 안 된 상태가 제일 나쁘다.
+        다음 로그인 때 안 켜지고, 사용자는 이유를 알 수 없다.
+        """
+        wanted = self.autostart_toggle.value
+        if autostart.set_enabled(wanted):
+            return
+
+        self.autostart_toggle.set(not wanted)
+        self.launch_label.config(
+            text="⚠ 자동 실행 설정을 바꾸지 못했습니다 (레지스트리에 쓸 수 없음).",
+            foreground=theme.ERROR)
 
     # ── 듣기 시작 / 중지 ──────────────────────────────────
     def start_listening(self) -> None:
@@ -374,3 +398,7 @@ class NeoToggleRow(ttk.Frame):
     @property
     def value(self) -> bool:
         return self._toggle.value
+
+    def set(self, value: bool) -> None:
+        """밖에서 값을 바꾼다 (설정 저장에 실패해 되돌려야 할 때)."""
+        self._toggle.set(value)

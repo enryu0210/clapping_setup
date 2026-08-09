@@ -13,17 +13,18 @@ from tkinter import ttk
 
 from ..console import force_utf8_console
 from ..session_lock import LockWatcher, is_session_locked
-from ..settings import Settings, load_settings
+from ..settings import Settings, load_settings, save_settings
 from . import theme
 from .apps_page import AppsPage
 from .audio_monitor import AudioMonitor
 from .calibrate_page import CalibratePage
 from .device_page import DevicePage
 from .main_page import MainPage
+from .tray import TrayIcon
 
 WINDOW_TITLE = "Clapping Setup"
 # 창 크기는 96 DPI 기준. 고해상도 화면에서는 theme.px() 로 함께 커진다.
-WINDOW_WIDTH, WINDOW_HEIGHT = 620, 730
+WINDOW_WIDTH, WINDOW_HEIGHT = 620, 765
 UI_REFRESH_MS = 50        # 화면 갱신 주기. 20fps면 막대가 충분히 부드럽다.
 LOCK_POLL_MS = 1500       # 화면 잠금 상태를 확인하는 주기.
 # 1.5초면 충분한 이유: 잠금이 풀린 걸 1초 늦게 알아도 사용자는 아직 자리에 앉는 중이다.
@@ -45,13 +46,22 @@ def _enable_dpi_awareness() -> None:
 class ClapLauncherApp(tk.Tk):
     """프로그램의 창 하나."""
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(self, settings: Settings | None = None,
+                 start_minimized: bool = False) -> None:
+        """
+        Args:
+            start_minimized: 창을 띄우지 않고 트레이에서 시작할지.
+                             (Windows 로그인 시 자동 실행되는 경로에서 쓴다)
+        """
         super().__init__()
         self.settings = settings if settings is not None else load_settings()
         self.monitor = AudioMonitor()
         self.current_page: ttk.Frame | None = None
         self._closed = False   # 정리를 두 번 하지 않기 위한 표시
         self._lock_watcher = LockWatcher()
+        self.tray = TrayIcon(on_show=self.show_window,
+                             on_toggle_listening=self.toggle_listening,
+                             on_quit=self.quit_app)
 
         # ⚠️ 화면 배율은 **화면을 만들기 전에** 정해야 한다.
         #    위젯들이 만들어지는 순간의 배율로 크기를 잡기 때문이다.
@@ -77,7 +87,15 @@ class ClapLauncherApp(tk.Tk):
         else:
             self.show_device_page()
 
-        self._bring_to_front()
+        # 트레이가 있어야 '창을 닫아도 계속 돈다'가 성립한다.
+        # 없으면(라이브러리 미설치·원격 세션 등) 창을 닫을 때 그냥 종료한다.
+        self.tray.start(listening=False)
+
+        if start_minimized and self.tray.available:
+            self.withdraw()          # 로그인 직후 창이 튀어나오지 않게
+        else:
+            self._bring_to_front()
+
         self.after(UI_REFRESH_MS, self._tick)
         self.after(LOCK_POLL_MS, self._check_session_lock)
 
@@ -169,14 +187,53 @@ class ClapLauncherApp(tk.Tk):
 
         오디오 스레드가 화면을 직접 건드리면 안 되므로, 화면 쪽에서 읽어가는 방식을 쓴다.
         (Tkinter 위젯은 메인 스레드에서만 만질 수 있다)
+
+        트레이 메뉴에서 온 요청도 여기서 처리한다. 같은 이유다 —
+        트레이 스레드가 창을 직접 건드리면 안 된다.
         """
+        self.tray.process_pending()
+
         page = self.current_page
         if page is not None and hasattr(page, "update_from_monitor"):
             try:
                 page.update_from_monitor()
             except tk.TclError:
                 return   # 창이 닫히는 중이면 조용히 멈춘다
+
+        self.tray.set_listening(self.is_listening())
         self.after(UI_REFRESH_MS, self._tick)
+
+    # ── 트레이에서 오는 요청 (전부 화면 스레드에서 실행된다) ──
+    def is_listening(self) -> bool:
+        """지금 마이크를 열고 있는가. 트레이 아이콘 색을 정하는 데 쓴다."""
+        page = self.current_page
+        session = getattr(page, "session", None)
+        return bool(session is not None and session.armed)
+
+    def show_window(self) -> None:
+        """트레이에서 '창 열기'. 숨겨둔 창을 다시 보여준다."""
+        if self._closed:
+            return
+        try:
+            self.deiconify()
+            self._bring_to_front()
+        except tk.TclError:
+            pass
+
+    def toggle_listening(self) -> None:
+        """트레이에서 '듣기 시작/중지'.
+
+        메인 화면이 듣기 상태를 관리하므로 그쪽에 넘긴다. 다른 화면(설정·보정)에
+        있을 때는 넘길 곳이 없으므로 창을 열어 사용자가 직접 하게 한다.
+        """
+        page = self.current_page
+        if hasattr(page, "_toggle_listening"):
+            try:
+                page._toggle_listening()
+                return
+            except tk.TclError:
+                return
+        self.show_window()
 
     def _check_session_lock(self) -> None:
         """화면 잠금이 방금 풀렸으면 현재 화면에 알려준다.
@@ -203,27 +260,63 @@ class ClapLauncherApp(tk.Tk):
         self.after(LOCK_POLL_MS, self._check_session_lock)
 
     def on_close(self) -> None:
-        """창을 닫을 때 오디오 스레드를 확실히 멈추고 나간다.
+        """창의 X 버튼을 눌렀을 때.
 
-        여러 번 불려도 안전해야 한다: 사용자가 X를 누른 뒤에도 마무리 정리(finally)에서
+        트레이가 살아 있으면 **종료하지 않고 숨긴다.** 잠금을 풀 때 알아서 켜지는 게
+        이 프로그램의 쓸모인데, 창을 닫았다고 죽어버리면 그 쓸모가 사라진다.
+        완전히 끄는 길은 트레이 메뉴의 '종료'다.
+        """
+        if self._closed:
+            return
+        if self.settings.minimize_to_tray and self.tray.running:
+            self.hide_to_tray()
+            return
+        self.quit_app()
+
+    def hide_to_tray(self) -> None:
+        """창만 숨긴다. 감지는 계속 돌아간다."""
+        try:
+            self.withdraw()
+        except tk.TclError:
+            return
+
+        # 처음 한 번은 어디로 갔는지 알려준다. 안 그러면 '꺼졌나?' 하고 또 실행하게 된다.
+        if not self.settings.tray_notice_shown:
+            self.settings.tray_notice_shown = True
+            try:
+                save_settings(self.settings)
+            except OSError:
+                pass       # 저장 실패는 이번 실행에만 영향을 준다
+            self.tray.notify("트레이에서 계속 실행 중입니다.\n"
+                             "완전히 끄려면 트레이 아이콘 → 종료를 누르세요.")
+
+    def quit_app(self) -> None:
+        """완전히 종료한다. 오디오 스레드와 트레이를 확실히 정리하고 나간다.
+
+        여러 번 불려도 안전해야 한다: 사용자가 종료를 누른 뒤에도 마무리 정리(finally)에서
         한 번 더 부르기 때문이다. 이미 닫힌 창에 destroy()를 부르면 오류가 난다.
         """
         if self._closed:
             return
         self._closed = True
         self.monitor.stop()
+        self.tray.stop()
         try:
             self.destroy()
         except tk.TclError:
             pass   # 이미 창이 사라진 상태 — 정상적인 종료 경로다
 
 
-def run_gui() -> int:
-    """GUI를 띄운다. 종료 코드를 반환한다."""
+def run_gui(start_minimized: bool = False) -> int:
+    """GUI를 띄운다. 종료 코드를 반환한다.
+
+    Args:
+        start_minimized: 창 없이 트레이에서 시작할지 (로그인 자동 실행용).
+    """
     # GUI라도 오류 메시지는 콘솔로 나가므로 인코딩을 먼저 맞춰둔다
     force_utf8_console()
     _enable_dpi_awareness()
-    app = ClapLauncherApp()
+    app = ClapLauncherApp(start_minimized=start_minimized)
     try:
         app.mainloop()
     except KeyboardInterrupt:
@@ -231,7 +324,8 @@ def run_gui() -> int:
         # 그냥 두면 파이썬 traceback이 그대로 쏟아져서 사용자는 프로그램이 고장 난 줄 안다.
         print("\n종료합니다.")
     finally:
-        # 어떻게 끝났든 마이크는 반드시 놓아준다.
+        # 어떻게 끝났든 마이크와 트레이는 반드시 정리한다.
         # 이걸 빠뜨리면 창은 사라졌는데 마이크를 붙잡은 프로세스가 남는다.
-        app.on_close()
+        # (on_close 가 아니라 quit_app 이다 — 여기서 트레이로 숨어봐야 소용없다)
+        app.quit_app()
     return 0

@@ -62,8 +62,10 @@ clapping_setup/
 │   │   └── clap_detector.py    [3] 박수 판단 (이 프로젝트의 심장)
 │   ├── launcher/
 │   │   ├── __init__.py
-│   │   └── app_launcher.py     [4] 프로그램 실행
+│   │   ├── app_launcher.py     [4] 프로그램 실행
+│   │   └── running_apps.py     실행 중인 프로그램 조회 (중복 방지)
 │   ├── console.py              콘솔 인코딩 보정 (한글 Windows 대응)
+│   ├── autostart.py            Windows 시작 시 자동 실행 등록/해제
 │   ├── settings.py             기기별 설정 저장 (고른 마이크 등)
 │   ├── listening.py            언제 듣고 언제 멈출지 (듣는 중 / 대기 중)
 │   ├── session_lock.py         Windows 화면 잠금 상태 감지
@@ -80,7 +82,7 @@ clapping_setup/
 │       ├── widgets.py          음량 막대 위젯과 그 계산
 │       ├── audio_monitor.py    오디오 스레드 ↔ 화면 사이의 다리
 │       ├── level_meter.py      콘솔 음량 미터 (--level) — 디버깅용
-│       └── tray.py             트레이 아이콘 (M5)
+│       └── tray.py             트레이 아이콘 (상주·상태 표시)
 │
 └── tests/                      🧪 테스트
     ├── test_clap_detector.py   가짜 신호로 감지 로직 검증
@@ -89,6 +91,9 @@ clapping_setup/
     ├── test_app_launcher.py    가짜 실행기로 순서·실패 격리 검증
     ├── test_main_page.py       박수 감지 → 실행 연결 검증
     ├── test_apps_page.py       목록 편집이 사라지지 않는지 검증
+    ├── test_running_apps.py    중복 실행 방지 판정 검증
+    ├── test_autostart.py       자동 실행 등록 (임시 레지스트리 키로)
+    ├── test_tray.py            트레이 스레드 → 화면 스레드 전달 검증
     ├── conftest.py             Tk 창 하나를 모든 테스트가 나눠 쓴다
     └── …                       (기능별로 파일 하나씩)
 ```
@@ -356,8 +361,26 @@ clapping_setup/
   덕분에 아이콘 코드를 두 벌 관리하지 않는다
 - Pillow가 없으면 예전처럼 캔버스에 직접 그린다 (자글자글하지만 동작한다)
 
-### `ui/tray.py` (M5)
-- 트레이 아이콘, 일시정지/재개, 종료, 상태 표시
+### `ui/tray.py` — 트레이 아이콘
+- 창을 닫으면 종료하지 않고 트레이로 내려간다. 아이콘 색이 곧 상태다(초록=듣는 중)
+- ⚠️ **pystray 는 자기 루프를 따로 돈다.** 메뉴 콜백이 트레이 스레드에서 불리므로,
+  거기서 Tkinter 위젯을 건드리면 프로그램이 이유 없이 멈추거나 죽는다
+  (audio_monitor.py 와 똑같은 함정) → 큐에 넣고 화면 스레드가 꺼내 실행한다
+- ⚠️ `available`(라이브러리가 있다)과 `running`(실제로 떠 있다)은 **다르다.**
+  창을 숨기는 판단은 반드시 `running` 으로 한다 — 트레이를 못 띄운 환경에서 숨기면
+  프로그램이 통째로 사라진다
+
+### `autostart.py` — Windows 시작 시 자동 실행
+- `HKEY_CURRENT_USER\...\Run` 레지스트리에 등록/해제 (관리자 권한이 필요 없다)
+- ⚠️ **상태를 settings.json 에 적지 않는다.** 진짜 상태는 레지스트리이고 사용자가
+  작업 관리자에서 직접 끌 수도 있다. 두 군데에 적으면 어긋났을 때 답이 없어진다
+- 등록되는 명령에는 `--minimized` 가 붙고, `python.exe` 가 아니라 **`pythonw.exe`** 를 쓴다
+  (로그인 때마다 창이나 검은 콘솔이 튀어나오면 누구라도 이 기능을 꺼버린다)
+
+### `launcher/running_apps.py` — 중복 실행 방지
+- 지금 돌고 있는 프로세스 이름을 ctypes 로 읽는다 (psutil 을 넣지 않기 위해)
+- 조회에 실패하면 **빈 집합**을 돌려준다 → '아무것도 안 켜져 있다'로 읽혀 평소처럼
+  전부 실행된다. 조회 실패 때문에 프로그램이 안 켜지는 쪽이 훨씬 나쁘다
 
 ---
 
@@ -376,6 +399,9 @@ clapping_setup/
 | `ui/apps_page.py` | 임시 설정 파일로 편집→저장→되읽기. **"고친 내용이 사라지지 않는가"** 가 핵심 |
 | `config.save_config` | 저장한 값을 되읽어 같은지(왕복) + `.bak` 백업이 남는지 |
 | `settings.py` | 깨진 JSON·형식이 다른 JSON·모르는 항목을 넣어 "죽지 않고 기본값" 확인 |
+| `running_apps.py` | 프로세스 이름 비교는 값으로. 실제 조회는 "지금 이 python 이 목록에 있는가"로 확인 |
+| `autostart.py` | **임시 레지스트리 키**를 가리키게 해서 진짜 winreg 호출을 검증 (사용자의 Run 키는 건드리지 않는다) |
+| `ui/tray.py` | pystray 없이 큐 전달만 검증. 아이콘이 뜨는지는 자동 확인이 불가능하다 |
 | `ui/widgets.py` | 값 → 막대 비율 계산은 순수 함수라 창 없이 검증 가능 |
 
 화면 자체(창이 뜨는지, 페이지가 전환되는지)는 자동 테스트가 어려워서, 창을 띄우고

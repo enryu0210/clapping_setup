@@ -1,6 +1,9 @@
 # ---- 개인/기기 전용 설정 ----
 # 프로그램 설치 경로는 PC마다 달라서 공유하면 안 됨 (example 파일만 공유)
 config/apps.yaml
+# [프로그램 설정] 화면에서 저장할 때 남기는 직전 파일 백업 (config.save_config)
+# 내용이 apps.yaml 과 같은 성격이라 이것도 공유하면 안 된다
+config/*.bak
 CLAUDE.local.md
 
 # ---- Python ----

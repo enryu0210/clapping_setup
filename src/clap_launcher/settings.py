@@ -38,6 +38,13 @@ class Settings:
     auto_arm_on_unlock: bool = True   # 화면 잠금이 풀리면 자동으로 듣기 시작
     listen_timeout_min: float = 5.0   # 이 시간 동안 박수가 없으면 자동으로 멈춤 (0=무제한)
 
+    # ── 트레이 상주 (자세한 배경은 ui/tray.py 참고) ──
+    minimize_to_tray: bool = True     # 창을 닫으면 종료하지 않고 트레이로 내려간다
+    tray_notice_shown: bool = False   # '트레이로 내려갔다'는 안내를 이미 보여줬는가
+    # ⚠️ '시작 시 자동 실행'은 여기 없다. 그건 Windows 레지스트리가 진짜 상태이고,
+    #    여기에 또 적으면 둘이 어긋났을 때 어느 쪽이 맞는지 알 수 없게 된다.
+    #    (사용자가 작업 관리자에서 직접 끌 수도 있다) → autostart.is_enabled() 로 그때그때 읽는다
+
     def to_dict(self) -> dict:
         return asdict(self)
 

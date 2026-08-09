@@ -39,6 +39,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="[디버깅] 박수 없이 등록된 프로그램을 지금 바로 실행합니다.",
     )
     parser.add_argument(
+        "--minimized", action="store_true",
+        help="창을 띄우지 않고 트레이에서 시작합니다. (Windows 시작 시 자동 실행용)",
+    )
+    parser.add_argument(
         "--reset-setup", action="store_true",
         help="저장된 마이크 선택을 지우고 처음 선택 화면부터 다시 시작합니다.",
     )
@@ -105,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # 옵션이 없으면 GUI를 띄운다 (일반 사용자가 실행하는 경로)
-    return _run_gui()
+    return _run_gui(start_minimized=args.minimized)
 
 
 def _check_config() -> int:
@@ -153,7 +157,7 @@ def _launch_apps_now() -> int:
     return 0 if result.ok else 1
 
 
-def _run_gui() -> int:
+def _run_gui(start_minimized: bool = False) -> int:
     """GUI를 띄운다. tkinter가 없는 환경도 있으므로 그때는 안내를 남긴다."""
     try:
         from .ui.app import run_gui
@@ -166,7 +170,7 @@ def _run_gui() -> int:
             file=sys.stderr,
         )
         return 1
-    return run_gui()
+    return run_gui(start_minimized=start_minimized)
 
 
 if __name__ == "__main__":
