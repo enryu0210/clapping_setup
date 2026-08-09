@@ -18,7 +18,7 @@ from .console import force_utf8_console
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="clap-launcher",
+        prog="clapdesk",
         description="박수 두 번(짝짝)으로 업무용 프로그램을 한 번에 실행합니다.",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")

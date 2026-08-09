@@ -22,8 +22,9 @@ dependencies = [
 ]
 
 [project.scripts]
-# 설치 후 터미널에서 `clap-launcher` 만 쳐도 실행됩니다.
-clap-launcher = "clap_launcher.__main__:main"
+# 설치 후 터미널에서 `clapdesk` 만 쳐도 실행됩니다.
+# (패키지 폴더 이름 clap_launcher 는 그대로 둔다 - import 경로가 바뀌면 전 파일이 흔들린다)
+clapdesk = "clap_launcher.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

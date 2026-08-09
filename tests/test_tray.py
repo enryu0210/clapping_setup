@@ -21,6 +21,10 @@ class TestLabels:
         assert "듣는 중" in tray.status_text(True)
         assert "마이크 사용 안 함" in tray.status_text(False)
 
+    def test_앱_이름이_들어간다(self):
+        """트레이에 마우스를 올렸을 때 어떤 프로그램인지 알 수 있어야 한다."""
+        assert tray.status_text(True).startswith("ClapDesk")
+
     def test_듣는_중일_때만_색이_다르다(self):
         assert tray.status_color(True) != tray.status_color(False)
 

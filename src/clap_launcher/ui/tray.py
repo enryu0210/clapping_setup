@@ -42,23 +42,31 @@ def toggle_label(listening: bool) -> str:
 def status_text(listening: bool) -> str:
     """아이콘에 마우스를 올렸을 때 뜨는 설명."""
     state = "듣는 중" if listening else "대기 중 (마이크 사용 안 함)"
-    return f"Clapping Setup — {state}"
+    return f"ClapDesk — {state}"
 
 
-def status_color(listening: bool) -> str:
-    """아이콘 색. 듣고 있을 때만 눈에 띄어야 한다."""
-    return theme.OK if listening else theme.FG_MUTED
+def status_color(listening: bool) -> tuple[str, str]:
+    """배지 색 (위, 아래). 듣고 있을 때만 눈에 띄어야 한다.
+
+    대기 중에는 회색 계열로 낮춘다 — '지금은 마이크를 안 쓴다'가 색만으로 읽혀야 한다.
+    """
+    if listening:
+        return theme.OK, "#1b8f66"
+    return theme.FG_MUTED, "#6f7890"
 
 
 def make_icon_image(listening: bool, size: int = ICON_SIZE):
     """트레이에 올릴 아이콘 이미지를 만든다.
 
-    메인 화면과 같은 박수 아이콘을 쓴다 — 작업표시줄에서도 같은 프로그램으로 알아보게.
+    앱 아이콘과 같은 '배지' 모양을 쓰되 **배지 색으로 상태를 표시한다.**
+    같은 프로그램인 걸 알아볼 수 있으면서, 지금 마이크를 열고 있는지도 한눈에 보인다.
+    (투명 배경의 가는 선 아이콘은 16px 트레이에서 거의 보이지 않는다)
 
     Returns:
         Pillow 이미지. Pillow 가 없으면 None (그때는 트레이 기능을 포기한다).
     """
-    return icons.render_image("clap", size, status_color(listening), width=4)
+    top, bottom = status_color(listening)
+    return icons.render_badge(size, fill=top, fill_bottom=bottom, mark="clap")
 
 
 class TrayIcon:
@@ -100,7 +108,7 @@ class TrayIcon:
         """
         return self._icon is not None
 
-    def notify(self, message: str, title: str = "Clapping Setup") -> None:
+    def notify(self, message: str, title: str = "ClapDesk") -> None:
         """풍선 알림. 창이 트레이로 내려갔다는 것을 처음 한 번 알리는 데 쓴다."""
         if self._icon is None:
             return
@@ -155,7 +163,7 @@ class TrayIcon:
         )
 
         try:
-            self._icon = pystray.Icon("clapping_setup", make_icon_image(listening),
+            self._icon = pystray.Icon("clapdesk", make_icon_image(listening),
                                       status_text(listening), menu)
             # daemon=True : 창을 강제로 닫아도 이 스레드가 프로그램을 붙잡지 않게
             self._thread = threading.Thread(target=self._icon.run, daemon=True,

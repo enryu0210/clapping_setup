@@ -1,4 +1,4 @@
-# 구조 설계 — Clapping Setup
+# 구조 설계 — ClapDesk
 
 > 최종 수정: 2026-08-08
 
@@ -39,6 +39,14 @@ clapping_setup/
 ├── pyproject.toml              패키지 정의 + 의존성 (src/ 레이아웃이라 필요)
 ├── requirements.txt            `pip install -r` 편의용 (-e . 를 가리킴)
 ├── .gitignore
+│
+├── assets/                     🎨 아이콘 (tools/make_icon.py 로 생성)
+│   ├── icon.ico                exe·창·작업표시줄용 (16~256px 한 파일)
+│   ├── icon.png                256px 단일 이미지
+│   └── icon_preview.png        크기별로 어떻게 보이는지 확인용
+│
+├── tools/                      🔧 개발용 스크립트
+│   └── make_icon.py            아이콘 생성 (색이 바뀌면 다시 돌린다)
 │
 ├── docs/                       📄 문서
 │   ├── PLAN.md                 계획서 (목표·리스크·마일스톤)
@@ -94,6 +102,7 @@ clapping_setup/
     ├── test_running_apps.py    중복 실행 방지 판정 검증
     ├── test_autostart.py       자동 실행 등록 (임시 레지스트리 키로)
     ├── test_tray.py            트레이 스레드 → 화면 스레드 전달 검증
+    ├── test_branding.py        아이콘 자산과 앱 이름이 흩어지지 않았는지 검증
     ├── conftest.py             Tk 창 하나를 모든 테스트가 나눠 쓴다
     └── …                       (기능별로 파일 하나씩)
 ```
@@ -184,7 +193,7 @@ clapping_setup/
 | 파일 | 누가 쓰나 | 위치 | 내용 |
 |------|-----------|------|------|
 | `config/apps.yaml` | **사람**이 손으로 편집 | 저장소 폴더 | 실행할 프로그램 목록, 감지 민감도 |
-| `settings.json` | **프로그램**이 저장 | `%LOCALAPPDATA%\ClappingSetup\` | UI에서 고른 마이크 |
+| `settings.json` | **프로그램**이 저장 | `%LOCALAPPDATA%\ClapDesk\` | UI에서 고른 마이크 |
 
 나눈 이유가 두 가지입니다.
 
@@ -277,7 +286,7 @@ clapping_setup/
 - **문법 오류**면 몇 번째 줄이 문제인지, **필수 항목 누락**이면 몇 번째 항목인지 알려줌
 - 값이 비어 있으면 기본값으로 채움
 - **경로를 코드에 박지 않는다**: `CLAP_LAUNCHER_CONFIG` → `<프로그램 폴더>/config/apps.yaml`
-  → `%LOCALAPPDATA%\ClappingSetup\apps.yaml` 순으로 찾는다.
+  → `%LOCALAPPDATA%\ClapDesk\apps.yaml` 순으로 찾는다.
   exe로 묶으면(M6) 기준 폴더가 `sys.executable` 옆으로 바뀌므로 그때그때 계산한다
 - ⚠️ **오타에 엄격하다**: 모르는 `detection` 항목은 오류로 처리한다. 사람이 손으로 적는
   파일이라 조용히 무시하면 "바꿨는데 왜 안 먹지"가 된다.

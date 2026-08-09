@@ -1,9 +1,15 @@
-# 👏 Clapping Setup
+<img src="assets/icon.png" width="96" align="left" alt="ClapDesk 아이콘" hspace="12">
 
-**박수 두 번(짝짝)이면 일할 준비 끝.**
+# ClapDesk
+
+**박수 두 번(짝짝)으로 펼치는 내 작업 환경.**
 
 마이크로 박수 소리를 감지해서, 미리 등록해 둔 업무용 프로그램들을 한 번에 실행해 주는 Windows 데스크톱 유틸리티입니다.
 재미로 만드는 개인 프로젝트지만, "매일 아침 똑같은 앱 8개 켜기"라는 진짜 귀찮음을 해결하는 게 목적입니다.
+
+<br clear="left">
+
+> 이름의 뜻: **Clap**(박수) + **Desk**(책상) — 박수 한 번으로 내 책상을 펼친다는 뜻입니다.
 
 ```
     짝    짝
@@ -79,7 +85,7 @@ python -m clap_launcher --launch-apps             # 박수 없이 지금 바로 
 항상 같은 모양·색으로 나옵니다.
 
 ```
-   Clapping Setup
+   ClapDesk
    ◟ 듣는 중  ·  4:58 남음
    박수 두 번(짝짝)을 기다리는 중…
 
@@ -199,7 +205,7 @@ python -m clap_launcher --launch-apps             # 박수 없이 지금 바로 
 > Windows 기본 장치가 실제 마이크가 아니라 **가상 오디오 장치**로 잡혀 있었습니다.
 > "박수를 쳐도 반응이 없다"의 대부분이 여기서 갈립니다.
 
-고른 마이크는 `%LOCALAPPDATA%\ClappingSetup\settings.json`에 저장되고, 다음부터는 바로
+고른 마이크는 `%LOCALAPPDATA%\ClapDesk\settings.json`에 저장되고, 다음부터는 바로
 메인 화면이 나옵니다. 바꾸고 싶으면 메인 화면의 `🎤 마이크 변경` 버튼을 누르세요.
 
 ### 콘솔에서 확인하기 (디버깅용)
@@ -230,6 +236,19 @@ python -m clap_launcher --launch-apps    # 박수 없이 지금 바로 실행해
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 모듈 구조, 데이터 흐름, 박수 감지 알고리즘 상세 |
 | [docs/CONFIG.md](docs/CONFIG.md) | 설정 파일(`apps.yaml`) 작성법과 모든 옵션 설명 |
 
+### 아이콘
+
+앱 아이콘은 **코드로 그립니다** (`tools/make_icon.py`). 테마 색이 바뀌면 다시 돌리기만 하면 되고,
+화면 안에서 쓰는 박수 마크와 같은 도형을 그대로 씁니다.
+
+```powershell
+python tools/make_icon.py     # assets/icon.ico, icon.png, icon_preview.png 를 다시 만듭니다
+```
+
+- `assets/icon.ico` — exe·창·작업표시줄용. 16~256px 을 한 파일에 담습니다
+  (작은 크기를 빼면 작업표시줄에서 흐려집니다)
+- 트레이 아이콘은 같은 배지를 **상태 색으로** 칠해서 씁니다 (초록=듣는 중, 회색=대기 중)
+
 ## 상태
 
 🎉 **MVP 동작 (v0.1)** — 박수 두 번이면 등록한 프로그램이 실제로 켜집니다.
@@ -246,6 +265,7 @@ python -m clap_launcher --launch-apps    # 박수 없이 지금 바로 실행해
 | M4 | 프로그램 실행 연결 (MVP) | ✅ |
 | M4.5 | 프로그램 설정 화면 + 화면 다듬기 | ✅ |
 | M5 | 트레이 상주·중복 실행 방지·자동 시작 | ✅ |
+| M5.5 | 이름(ClapDesk)·아이콘 정하기 | ✅ |
 | M6 | exe 패키징 (PyInstaller) | ⬅️ 다음 |
 
 ## 환경

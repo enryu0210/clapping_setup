@@ -424,6 +424,64 @@ def render_image(name: str, box: int, color: str, width: int = 2):
         return None      # 아이콘은 장식이다. 실패해도 프로그램이 죽을 이유는 없다
 
 
+def render_badge(size: int, fill: str, fill_bottom: str | None = None,
+                 mark: str = "clap", mark_color: str = "#ffffff"):
+    """앱 아이콘용 '배지'를 그린다 — 색이 꽉 찬 둥근 사각형 + 흰 마크.
+
+    왜 선 아이콘이 아니라 배지인가:
+    화면 안에서는 선 아이콘이 뉴모피즘과 잘 어울리지만, **작업표시줄과 트레이에서는
+    16px까지 줄어든다.** 그 크기에서 투명 배경의 가는 선은 거의 보이지 않는다.
+    색 덩어리로 보여야 다른 아이콘들 사이에서 눈에 띈다.
+
+    Args:
+        size: 결과 이미지 한 변 (정사각형)
+        fill: 배지 색 (위쪽). 트레이에서는 이 색으로 상태를 표시한다
+        fill_bottom: 아래쪽 색. 주면 위→아래 그라데이션이 된다
+        mark: 배지 위에 얹을 아이콘 이름
+        mark_color: 마크 색
+
+    Returns:
+        RGBA 이미지. Pillow가 없으면 None.
+    """
+    if not _HAS_PIL or mark not in _ICONS or size < 8:
+        return None
+
+    ss = SUPERSAMPLE
+    big = size * ss
+    top_rgb = _hex_to_rgb(fill)
+    bottom_rgb = _hex_to_rgb(fill_bottom or fill)
+
+    # 세로 그라데이션: 한 줄짜리 이미지를 만들어 늘리면 픽셀마다 계산할 필요가 없다
+    column = Image.new("RGB", (1, big))
+    for y in range(big):
+        ratio = y / max(1, big - 1)
+        column.putpixel((0, y), tuple(
+            round(top + (bottom - top) * ratio)
+            for top, bottom in zip(top_rgb, bottom_rgb)))
+    gradient = column.resize((big, big))
+
+    # 둥근 사각형으로 오려낸다. 모서리 반경은 크기에 비례해야 어떤 크기에서도 같아 보인다.
+    mask = Image.new("L", (big, big), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, big - 1, big - 1],
+                                           radius=int(big * 0.22), fill=255)
+    badge = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    badge.paste(gradient, (0, 0), mask)
+
+    # 마크 크기·두께는 **16px 에서 알아볼 수 있는지**를 기준으로 정했다.
+    # 더 작게 잡으면(0.58) 트레이에서 형체가 뭉개지고, 더 키우면 모서리에 닿는다.
+    try:
+        _ICONS[mark](_PilCanvas(ImageDraw.Draw(badge)), big / 2, big / 2,
+                     big * 0.70, mark_color, max(2, int(big * 0.07)))
+        return badge.resize((size, size), Image.LANCZOS)
+    except Exception:
+        return None
+
+
+def _hex_to_rgb(color: str) -> tuple[int, int, int]:
+    color = color.lstrip("#")
+    return tuple(int(color[i:i + 2], 16) for i in (0, 2, 4))
+
+
 def _icon_photo(name: str, size: int, color: str, width: int):
     """아이콘 하나를 부드러운 이미지로 만든다. 이미 만든 것은 그대로 재사용한다.
 

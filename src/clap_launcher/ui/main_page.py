@@ -97,7 +97,7 @@ class MainPage(ttk.Frame):
         header.pack(anchor="w")
         icons.draw(header, "clap", size / 2 + theme.px(2), theme.px(20), size,
                    theme.ACCENT, width=2)
-        header.create_text(theme.px(42), theme.px(21), text="Clapping Setup", anchor="w",
+        header.create_text(theme.px(42), theme.px(21), text="ClapDesk", anchor="w",
                            fill=theme.FG, font=theme.FONT_TITLE)
 
     def _build_log(self) -> None:

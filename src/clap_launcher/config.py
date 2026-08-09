@@ -16,7 +16,7 @@ from pathlib import Path
 
 import yaml
 
-from .settings import APP_DIR_NAME
+from .settings import APP_DIR_NAME, LEGACY_APP_DIR_NAME
 
 CONFIG_ENV_VAR = "CLAP_LAUNCHER_CONFIG"   # 테스트·고급 사용자가 경로를 갈아끼우는 통로
 CONFIG_FILE_NAME = "apps.yaml"
@@ -158,7 +158,8 @@ def config_search_paths() -> list[Path]:
 
     1. 환경변수 CLAP_LAUNCHER_CONFIG — 테스트와 '다른 설정으로 잠깐 돌려보기'용
     2. 프로그램 폴더의 config/apps.yaml — 개발 중에 실제로 편집하는 파일
-    3. %LOCALAPPDATA%\\ClappingSetup\\apps.yaml — exe를 쓰기 금지 폴더에 설치했을 때의 대피처
+    3. %LOCALAPPDATA%\\ClapDesk\\apps.yaml — exe를 쓰기 금지 폴더에 설치했을 때의 대피처
+    4. 예전 이름(ClappingSetup) 폴더 — 이름을 바꾸기 전에 저장해 둔 설정을 잃지 않기 위해
     """
     override = os.environ.get(CONFIG_ENV_VAR)
     if override:
@@ -167,7 +168,9 @@ def config_search_paths() -> list[Path]:
     paths = [_app_dir() / "config" / CONFIG_FILE_NAME]
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
-        paths.append(Path(local_app_data) / APP_DIR_NAME / CONFIG_FILE_NAME)
+        base = Path(local_app_data)
+        paths.append(base / APP_DIR_NAME / CONFIG_FILE_NAME)
+        paths.append(base / LEGACY_APP_DIR_NAME / CONFIG_FILE_NAME)
     return paths
 
 
@@ -435,7 +438,7 @@ BACKUP_SUFFIX = ".bak"
 
 _FILE_HEADER = """\
 # ================================================================
-#  Clapping Setup 설정
+#  ClapDesk 설정
 #
 #  ⚠️ 이 파일은 프로그램의 [프로그램 설정] 화면에서 저장할 때 **다시 작성**됩니다.
 #     직접 적어둔 주석은 그때 사라집니다. 직전 내용은 apps.yaml.bak 에 남습니다.

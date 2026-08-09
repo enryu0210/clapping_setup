@@ -24,7 +24,7 @@
 | 파일 | 누가 관리하나 | 위치 | 내용 |
 |------|---------------|------|------|
 | `config/apps.yaml` | **내가** 직접 편집 | 저장소 폴더 | 실행할 프로그램, 감지 민감도 |
-| `settings.json` | **프로그램**이 저장 | `%LOCALAPPDATA%\ClappingSetup\` | UI에서 고른 마이크 |
+| `settings.json` | **프로그램**이 저장 | `%LOCALAPPDATA%\ClapDesk\` | UI에서 고른 마이크 |
 
 `settings.json`은 직접 열어볼 일이 거의 없습니다. 마이크를 다시 고르고 싶으면
 프로그램의 `🎤 마이크 변경` 버튼을 누르거나, 콘솔에서 `--reset-setup`을 쓰면 됩니다.
@@ -69,7 +69,7 @@ copy config\apps.example.yaml config\apps.yaml
 |------|------|-------------|
 | 1 | 환경변수 `CLAP_LAUNCHER_CONFIG` 가 가리키는 파일 | 다른 설정으로 잠깐 돌려볼 때 |
 | 2 | `<프로그램 폴더>/config/apps.yaml` | **보통 이것** (저장소에서 개발·실행할 때) |
-| 3 | `%LOCALAPPDATA%\ClappingSetup\apps.yaml` | exe를 쓰기 금지 폴더에 설치했을 때 |
+| 3 | `%LOCALAPPDATA%\ClapDesk\apps.yaml` | exe를 쓰기 금지 폴더에 설치했을 때 |
 
 지금 어떤 파일을 읽고 있는지는 아래 명령으로 확인할 수 있습니다.
 

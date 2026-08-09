@@ -19,7 +19,11 @@ import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-APP_DIR_NAME = "ClappingSetup"
+APP_DIR_NAME = "ClapDesk"
+# 예전 이름. 앱 이름을 ClappingSetup → ClapDesk 로 바꾸면서, 이미 저장된 설정
+# (고른 마이크·박수 보정 결과)이 고아가 되지 않도록 여기서 한 번 옮겨온다.
+# ⚠️ 지우지 말 것: 예전 버전을 쓰던 기기에서 넘어올 때마다 필요하다.
+LEGACY_APP_DIR_NAME = "ClappingSetup"
 SETTINGS_ENV_VAR = "CLAP_LAUNCHER_SETTINGS"  # 테스트에서 저장 경로를 갈아끼우기 위한 통로
 
 
@@ -58,15 +62,29 @@ class Settings:
         return cls(**known)
 
 
+def _base_dir() -> Path:
+    """설정을 둘 사용자 폴더. LOCALAPPDATA 는 Windows에만 있어 없으면 홈 폴더로 물러선다."""
+    return Path(os.environ.get("LOCALAPPDATA") or str(Path.home()))
+
+
 def settings_path() -> Path:
     """설정 파일의 전체 경로. 환경변수로 덮어쓸 수 있다(테스트용)."""
     override = os.environ.get(SETTINGS_ENV_VAR)
     if override:
         return Path(override)
+    return _base_dir() / APP_DIR_NAME / "settings.json"
 
-    # LOCALAPPDATA 는 Windows에만 있다. 없으면 홈 폴더로 물러선다.
-    base = os.environ.get("LOCALAPPDATA") or str(Path.home())
-    return Path(base) / APP_DIR_NAME / "settings.json"
+
+def legacy_settings_path() -> Path | None:
+    """예전 이름으로 저장된 설정 파일. 없으면 None.
+
+    환경변수로 경로를 지정한 경우에는 예전 파일을 찾지 않는다.
+    (테스트가 남의 기기에 있는 진짜 설정을 읽어오면 결과가 기기마다 달라진다)
+    """
+    if os.environ.get(SETTINGS_ENV_VAR):
+        return None
+    path = _base_dir() / LEGACY_APP_DIR_NAME / "settings.json"
+    return path if path.is_file() else None
 
 
 def load_settings() -> Settings:
@@ -74,8 +92,16 @@ def load_settings() -> Settings:
 
     설정 파일이 깨졌다고 프로그램이 죽으면 사용자는 손쓸 방법이 없다.
     (그 파일을 어떻게 지우는지도 모른다) 조용히 기본값으로 시작하는 편이 낫다.
+
+    새 이름의 설정이 아직 없고 **예전 이름의 설정이 있으면 그걸 읽어와 옮겨 적는다.**
+    안 그러면 이름을 바꾼 순간 마이크 선택과 박수 보정 결과가 통째로 사라진다.
     """
     path = settings_path()
+    if not path.is_file():
+        migrated = _load_legacy_settings()
+        if migrated is not None:
+            return migrated
+
     try:
         with path.open(encoding="utf-8") as f:
             data = json.load(f)
@@ -87,6 +113,36 @@ def load_settings() -> Settings:
     if not isinstance(data, dict):
         return Settings()
     return Settings.from_dict(data)
+
+
+def _load_legacy_settings() -> Settings | None:
+    """예전 이름 폴더의 설정을 읽어 새 위치에 저장한다.
+
+    Returns:
+        옮겨온 설정. 예전 파일이 없거나 못 읽으면 None.
+
+    ⚠️ 예전 파일은 **지우지 않는다.** 옮기다 실패했을 때 되돌릴 곳이 없어지고,
+       예전 버전을 다시 실행할 일이 있을 수도 있다. 용량도 1KB 남짓이다.
+    """
+    legacy = legacy_settings_path()
+    if legacy is None:
+        return None
+
+    try:
+        with legacy.open(encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    settings = Settings.from_dict(data)
+    try:
+        save_settings(settings)      # 다음 실행부터는 새 위치에서 바로 읽힌다
+        print(f"이전 설정을 옮겨왔습니다: {legacy} → {settings_path()}")
+    except OSError:
+        pass       # 옮겨 적지 못해도 이번 실행에는 값을 쓸 수 있다
+    return settings
 
 
 def save_settings(settings: Settings) -> None:

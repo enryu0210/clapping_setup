@@ -8,13 +8,15 @@
   선택을 마친 뒤  → MainPage   (상태 표시)
 """
 
+import sys
 import tkinter as tk
+from pathlib import Path
 from tkinter import ttk
 
 from ..console import force_utf8_console
 from ..session_lock import LockWatcher, is_session_locked
 from ..settings import Settings, load_settings, save_settings
-from . import theme
+from . import icons, theme
 from .apps_page import AppsPage
 from .audio_monitor import AudioMonitor
 from .calibrate_page import CalibratePage
@@ -22,13 +24,33 @@ from .device_page import DevicePage
 from .main_page import MainPage
 from .tray import TrayIcon
 
-WINDOW_TITLE = "Clapping Setup"
+WINDOW_TITLE = "ClapDesk"
 # 창 크기는 96 DPI 기준. 고해상도 화면에서는 theme.px() 로 함께 커진다.
 WINDOW_WIDTH, WINDOW_HEIGHT = 620, 765
 UI_REFRESH_MS = 50        # 화면 갱신 주기. 20fps면 막대가 충분히 부드럽다.
 LOCK_POLL_MS = 1500       # 화면 잠금 상태를 확인하는 주기.
 # 1.5초면 충분한 이유: 잠금이 풀린 걸 1초 늦게 알아도 사용자는 아직 자리에 앉는 중이다.
 # 더 자주 물어봐야 할 이유가 없고, Windows API 호출도 공짜는 아니다.
+
+
+def app_icon_path() -> Path | None:
+    """앱 아이콘 파일(assets/icon.ico)의 경로. 없으면 None.
+
+    ⚠️ 경로를 코드에 박지 않는다. 소스로 실행할 때와 exe 로 묶었을 때 위치가 다르다.
+       PyInstaller 는 --add-data 로 넣은 파일을 sys._MEIPASS 아래에 푼다.
+    """
+    bases = []
+    meipass = getattr(sys, "_MEIPASS", None)      # exe 안에서 실행 중일 때만 있다
+    if meipass:
+        bases.append(Path(meipass))
+    # src/clap_launcher/ui/app.py → [0]=ui, [1]=clap_launcher, [2]=src, [3]=저장소 루트
+    bases.append(Path(__file__).resolve().parents[3])
+
+    for base in bases:
+        candidate = base / "assets" / "icon.ico"
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def _enable_dpi_awareness() -> None:
@@ -68,6 +90,7 @@ class ClapLauncherApp(tk.Tk):
         theme.init_scaling(self)
 
         self.title(WINDOW_TITLE)
+        self._apply_window_icon()
         width, height = theme.px(WINDOW_WIDTH), theme.px(WINDOW_HEIGHT)
         self.geometry(f"{width}x{height}")
         self.minsize(width - theme.px(20), height - theme.px(40))
@@ -98,6 +121,33 @@ class ClapLauncherApp(tk.Tk):
 
         self.after(UI_REFRESH_MS, self._tick)
         self.after(LOCK_POLL_MS, self._check_session_lock)
+
+    def _apply_window_icon(self) -> None:
+        """제목 표시줄·작업표시줄·Alt+Tab 에 쓰이는 창 아이콘을 지정한다.
+
+        파일(assets/icon.ico)이 있으면 그걸 쓰고, 없으면 그 자리에서 그려서 쓴다.
+        exe 로 묶었을 때 파일이 빠지는 사고가 흔해서 **그림으로 물러설 길**을 남겨둔다.
+        (아이콘이 없다고 창이 안 뜨면 안 되므로 실패는 전부 조용히 넘어간다)
+        """
+        icon_file = app_icon_path()
+        if icon_file is not None:
+            try:
+                self.iconbitmap(default=str(icon_file))
+                return
+            except tk.TclError:
+                pass
+
+        try:
+            from PIL import ImageTk
+
+            image = icons.render_badge(64, fill=theme.ACCENT, fill_bottom=theme.ACCENT_DARK)
+            if image is None:
+                return
+            # 참조를 들고 있어야 한다. 놓으면 가비지 컬렉션돼 아이콘이 사라진다.
+            self._icon_photo = ImageTk.PhotoImage(image)
+            self.iconphoto(True, self._icon_photo)
+        except Exception:
+            pass
 
     def _bring_to_front(self) -> None:
         """창을 확실히 맨 앞에 띄운다.

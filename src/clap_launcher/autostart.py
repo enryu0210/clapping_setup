@@ -18,7 +18,10 @@ import sys
 from pathlib import Path
 
 RUN_KEY_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
-VALUE_NAME = "ClappingSetup"      # 레지스트리에 남는 이름 (사용자가 작업 관리자에서 보게 된다)
+VALUE_NAME = "ClapDesk"           # 레지스트리에 남는 이름 (사용자가 작업 관리자에서 보게 된다)
+# 예전 이름으로 등록해 둔 것. 앱 이름을 바꿨는데 이걸 그냥 두면
+# **화면 토글은 '꺼짐'인데 로그인하면 실행되는** 유령 상태가 된다. 그래서 함께 정리한다.
+LEGACY_VALUE_NAMES = ("ClappingSetup",)
 
 
 def build_launch_command() -> str:
@@ -31,7 +34,7 @@ def build_launch_command() -> str:
        트레이에 조용히 들어가 있다가 잠금을 풀 때 일하는 게 이 기능의 취지에 맞다.
 
     Returns:
-        exe 로 묶였으면      : "C:/.../ClappingSetup.exe" --minimized
+        exe 로 묶였으면      : "C:/.../ClapDesk.exe" --minimized
         소스로 실행 중이면   : "C:/.../pythonw.exe" -m clap_launcher --minimized
     """
     executable = Path(sys.executable)
@@ -69,6 +72,9 @@ def _open_run_key(write: bool):
 def is_enabled() -> bool:
     """자동 실행이 등록되어 있는가.
 
+    예전 이름으로 등록된 것도 '켜짐'으로 본다. 그래야 화면 토글이 실제 동작과 일치한다.
+    (예전 이름이 남아 있으면 로그인할 때 실제로 실행된다)
+
     Returns:
         Windows 가 아니거나 읽지 못하면 False. (없는 기능은 '꺼짐'으로 보여주는 게 정직하다)
     """
@@ -78,22 +84,41 @@ def is_enabled() -> bool:
 
     import winreg
     try:
-        value, _type = winreg.QueryValueEx(key, VALUE_NAME)
-        return bool(value)
-    except OSError:
-        return False          # 값이 없다 = 등록 안 됨. 정상적인 상황이다
+        for name in (VALUE_NAME, *LEGACY_VALUE_NAMES):
+            try:
+                value, _type = winreg.QueryValueEx(key, name)
+            except OSError:
+                continue      # 이 이름으로는 등록 안 됨 — 다음 이름을 본다
+            if value:
+                return True
+        return False
     finally:
         key.Close()
 
 
+def _delete_values(key, names) -> None:
+    """주어진 이름들을 지운다. 없으면 그냥 넘어간다."""
+    import winreg
+
+    for name in names:
+        try:
+            winreg.DeleteValue(key, name)
+        except OSError:
+            pass              # 원래 없었다 — 지울 것도 없다
+
+
 def enable() -> bool:
-    """자동 실행을 등록한다. 성공하면 True."""
+    """자동 실행을 등록한다. 성공하면 True.
+
+    예전 이름은 함께 지운다. 안 그러면 로그인할 때 두 번 실행된다.
+    """
     key = _open_run_key(write=True)
     if key is None:
         return False
 
     import winreg
     try:
+        _delete_values(key, LEGACY_VALUE_NAMES)
         winreg.SetValueEx(key, VALUE_NAME, 0, winreg.REG_SZ, build_launch_command())
         return True
     except OSError:
@@ -106,17 +131,15 @@ def disable() -> bool:
     """자동 실행 등록을 지운다. 성공하면 True.
 
     이미 없는 경우에도 True 를 돌려준다. 사용자가 원한 결과('등록되어 있지 않음')는
-    똑같이 이뤄졌기 때문이다.
+    똑같이 이뤄졌기 때문이다. 예전 이름도 함께 지운다 —
+    하나만 지우면 토글은 꺼졌는데 로그인하면 실행되는 유령 상태가 남는다.
     """
     key = _open_run_key(write=True)
     if key is None:
         return False
 
-    import winreg
     try:
-        winreg.DeleteValue(key, VALUE_NAME)
-    except FileNotFoundError:
-        pass                  # 원래 없었다 — 목표는 이미 달성됐다
+        _delete_values(key, (VALUE_NAME, *LEGACY_VALUE_NAMES))
     except OSError:
         return False
     finally:

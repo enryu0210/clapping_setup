@@ -10,8 +10,11 @@ import json
 import pytest
 
 from clap_launcher.settings import (
+    APP_DIR_NAME,
+    LEGACY_APP_DIR_NAME,
     SETTINGS_ENV_VAR,
     Settings,
+    legacy_settings_path,
     load_settings,
     save_settings,
     settings_path,
@@ -90,4 +93,77 @@ def test_환경변수가_없으면_사용자_폴더에_저장한다(monkeypatch)
     monkeypatch.delenv(SETTINGS_ENV_VAR, raising=False)
     path = settings_path()
     assert path.name == "settings.json"
-    assert "ClappingSetup" in str(path)
+    assert APP_DIR_NAME in str(path)
+
+
+class TestLegacyMigration:
+    """앱 이름을 ClappingSetup → ClapDesk 로 바꾸면서 기존 설정을 잃지 않아야 한다.
+
+    ⭐ 여기가 틀리면 이름을 바꾼 순간 **마이크 선택과 박수 보정 결과가 통째로 사라진다.**
+    사용자 입장에서는 업데이트했더니 처음부터 다시 설정하라는 화면이 뜨는 셈이다.
+    """
+
+    @pytest.fixture
+    def fake_local_appdata(self, tmp_path, monkeypatch):
+        """설정 폴더의 부모를 임시 폴더로 돌린다 (진짜 %LOCALAPPDATA% 를 안 건드리게)."""
+        monkeypatch.delenv(SETTINGS_ENV_VAR, raising=False)
+        monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+        return tmp_path
+
+    def _write_legacy(self, base, **values):
+        legacy = base / LEGACY_APP_DIR_NAME / "settings.json"
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        data = {"device": 3, "device_label": "Mic In", "setup_done": True,
+                "detection": {"max_harmonicity": 0.42}}
+        data.update(values)
+        legacy.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        return legacy
+
+    def test_예전_설정을_읽어온다(self, fake_local_appdata):
+        self._write_legacy(fake_local_appdata)
+
+        settings = load_settings()
+
+        assert settings.device == 3
+        assert settings.setup_done is True
+        assert settings.detection == {"max_harmonicity": 0.42}   # 보정 결과가 살아남는다
+
+    def test_읽어온_뒤_새_위치에_옮겨_적는다(self, fake_local_appdata):
+        """다음 실행부터는 예전 폴더를 보지 않아도 되게."""
+        self._write_legacy(fake_local_appdata)
+
+        load_settings()
+
+        assert (fake_local_appdata / APP_DIR_NAME / "settings.json").is_file()
+
+    def test_예전_파일을_지우지_않는다(self, fake_local_appdata):
+        """옮기다 잘못돼도 되돌릴 곳이 있어야 한다. 용량도 1KB 남짓이다."""
+        legacy = self._write_legacy(fake_local_appdata)
+        load_settings()
+        assert legacy.is_file()
+
+    def test_새_설정이_있으면_예전_것을_보지_않는다(self, fake_local_appdata):
+        """⭐ 이미 새 이름으로 쓰던 사람의 설정을 예전 값으로 덮으면 안 된다."""
+        self._write_legacy(fake_local_appdata, device=3, device_label="예전 마이크")
+        save_settings(Settings(device=7, device_label="지금 마이크", setup_done=True))
+
+        assert load_settings().device == 7
+
+    def test_예전_것도_없으면_기본값(self, fake_local_appdata):
+        assert load_settings() == Settings()
+
+    def test_예전_파일이_깨져_있어도_죽지_않는다(self, fake_local_appdata):
+        legacy = fake_local_appdata / LEGACY_APP_DIR_NAME / "settings.json"
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text("{망가진 json", encoding="utf-8")
+
+        assert load_settings() == Settings()
+
+    def test_환경변수를_쓰면_예전_폴더를_찾지_않는다(self, tmp_path, monkeypatch):
+        """테스트가 남의 기기에 있는 진짜 설정을 읽어오면 결과가 기기마다 달라진다."""
+        monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+        monkeypatch.setenv(SETTINGS_ENV_VAR, str(tmp_path / "따로.json"))
+        self._write_legacy(tmp_path)
+
+        assert legacy_settings_path() is None
+        assert load_settings() == Settings()
