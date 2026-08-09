@@ -11,3 +11,4 @@
 
 # ── 개발용 ──
 pytest>=8.0
+pyinstaller>=6.0     # 배포용 exe 만들기 (python tools/build_exe.py)

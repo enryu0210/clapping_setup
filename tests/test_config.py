@@ -63,6 +63,23 @@ class TestMissingOrBroken:
         assert "apps.example.yaml" in message      # 무엇을 복사하면 되는지
         assert "없는파일.yaml" in message           # 어디를 찾아봤는지
 
+    def test_exe로_받은_사람에게는_다른_안내를_한다(self, tmp_path, monkeypatch):
+        """⭐ exe 하나만 받은 사람 옆에는 apps.example.yaml 이 없다.
+
+        그 사람에게 '예시 파일을 복사하세요'라고 하면 없는 파일을 찾아 헤매게 된다.
+        """
+        import sys
+
+        monkeypatch.setenv(CONFIG_ENV_VAR, str(tmp_path / "없는파일.yaml"))
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+        with pytest.raises(ConfigError) as exc:
+            load_config()
+
+        message = str(exc.value)
+        assert "프로그램 설정" in message           # 화면에서 등록하라고 안내
+        assert "apps.example.yaml" not in message   # 없는 파일을 언급하지 않는다
+
     def test_문법이_깨지면_줄_번호를_알려준다(self, write_config):
         """⭐ 줄 번호가 없으면 사용자는 100줄짜리 파일을 눈으로 훑어야 한다."""
         write_config("apps:\n  - name: A\n   path: 어긋난들여쓰기\n")

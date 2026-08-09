@@ -13,7 +13,7 @@ import argparse
 import sys
 
 from . import __version__
-from .console import force_utf8_console
+from .console import force_utf8_console, restore_console_output
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -66,6 +66,9 @@ def _parse_device(raw: str | None) -> int | str | None:
 
 def main(argv: list[str] | None = None) -> int:
     """실행 결과를 종료 코드로 반환한다 (0=정상)."""
+    # exe 는 콘솔 없이 묶여 있다. 터미널에서 실행했다면 그 콘솔에 붙어야
+    # --check-config 같은 진단 명령의 출력이 보인다. (자세한 배경은 console.py)
+    restore_console_output()
     force_utf8_console()
     args = _build_parser().parse_args(argv)
 

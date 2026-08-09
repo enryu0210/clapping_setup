@@ -183,14 +183,20 @@ def find_config_path() -> Path | None:
 
 
 def _missing_config_message(searched: list[Path]) -> str:
-    """설정 파일이 없을 때의 안내문. '어디를 찾아봤고 무엇을 하면 되는지'까지 적는다."""
+    """설정 파일이 없을 때의 안내문. '어디를 찾아봤고 무엇을 하면 되는지'까지 적는다.
+
+    ⚠️ 안내 내용이 실행 방식에 따라 달라야 한다.
+       exe 로 받은 사람 옆에는 apps.example.yaml 이 없다(exe 하나만 받았으므로).
+       그 사람에게 "예시 파일을 복사하세요"라고 하면 없는 파일을 찾아 헤매게 된다.
+    """
     where = "\n".join(f"    - {path}" for path in searched)
-    return (
-        "설정 파일을 찾지 못했습니다.\n"
-        f"  찾아본 곳:\n{where}\n"
-        "  예시 파일을 복사한 뒤 본인 PC의 경로로 고쳐주세요:\n"
-        f"    copy config\\{EXAMPLE_FILE_NAME} config\\{CONFIG_FILE_NAME}"
-    )
+    if getattr(sys, "frozen", False):
+        how = ("  프로그램을 실행한 뒤 [프로그램 설정] 화면에서 실행할 프로그램을 등록하세요.\n"
+               "  저장하면 위 첫 번째 위치에 설정 파일이 만들어집니다.")
+    else:
+        how = ("  예시 파일을 복사한 뒤 본인 PC의 경로로 고쳐주세요:\n"
+               f"    copy config\\{EXAMPLE_FILE_NAME} config\\{CONFIG_FILE_NAME}")
+    return f"설정 파일을 찾지 못했습니다.\n  찾아본 곳:\n{where}\n{how}"
 
 
 # ── 파싱 ─────────────────────────────────────────────────────

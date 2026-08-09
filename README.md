@@ -47,7 +47,36 @@
 > 그래서 **리미터·클리핑 가드가 걸린 마이크**(Elgato Wave Link, 오디오 인터페이스 등)에서도
 > 동작합니다. 이유는 [docs/DETECTION.md](docs/DETECTION.md)에 정리했습니다.
 
-## 빠른 시작
+## 빠른 시작 — 그냥 쓰고 싶다면
+
+**`ClapDesk.exe` 하나만 있으면 됩니다.** 파이썬을 깔 필요가 없습니다.
+
+1. `ClapDesk.exe` 를 아무 폴더에 두고 더블클릭
+2. 마이크를 고르고 → `[≡ 프로그램 설정]` 에서 실행할 프로그램 등록
+3. 끝. 창을 닫아도 트레이에서 계속 돕니다
+
+> 설정은 **exe 옆의 `config/apps.yaml`** 에 저장됩니다. USB에 넣어 들고 다녀도 설정이 따라옵니다.
+> (쓰기 금지 폴더에 두면 `%LOCALAPPDATA%\ClapDesk\` 로 물러섭니다)
+
+### exe 직접 만들기
+
+```powershell
+pip install pyinstaller
+python tools/build_exe.py      # → dist/ClapDesk.exe (약 21MB)
+```
+
+빌드 옵션은 `tools/build_exe.py` 안에 **왜 필요한지와 함께** 적어 뒀습니다.
+옵션 하나가 빠지면 "내 PC에서는 되는데 남의 PC에서는 안 되는" exe가 나오는데,
+그런 문제는 원인을 찾기가 정말 어렵기 때문입니다.
+
+> 🔍 **exe 에서도 진단 명령이 그대로 됩니다.** 창 없는 앱이라 원래는 출력이 사라지지만,
+> 터미널에서 실행하면 그 콘솔에 붙어서 결과를 보여줍니다.
+> ```powershell
+> .\ClapDesk.exe --check-config    # 설정이 올바른지
+> .\ClapDesk.exe --list-devices    # 마이크가 잡히는지
+> ```
+
+## 소스로 실행하기 (개발)
 
 ```powershell
 # 1. 가상환경
@@ -266,7 +295,7 @@ python tools/make_icon.py     # assets/icon.ico, icon.png, icon_preview.png 를 
 | M4.5 | 프로그램 설정 화면 + 화면 다듬기 | ✅ |
 | M5 | 트레이 상주·중복 실행 방지·자동 시작 | ✅ |
 | M5.5 | 이름(ClapDesk)·아이콘 정하기 | ✅ |
-| M6 | exe 패키징 (PyInstaller) | ⬅️ 다음 |
+| M6 | exe 패키징 (PyInstaller) | ✅ |
 
 ## 환경
 
