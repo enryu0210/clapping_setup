@@ -13,11 +13,13 @@
 자세한 배경은 listening.py, 잠금 감지는 session_lock.py 참고.
 """
 
+import threading
 import time
 import tkinter as tk
 from tkinter import ttk
 
-from ..config import DetectionConfig
+from ..config import ConfigError, DetectionConfig, load_config
+from ..launcher.app_launcher import AppLauncher
 from ..listening import ListeningSession, StopReason, format_remaining
 from ..settings import save_settings
 from . import icons, theme
@@ -49,8 +51,13 @@ class MainPage(ttk.Frame):
 
         self.session = ListeningSession()
         self._shown_events = 0    # 로그에 이미 그린 이벤트의 누적 개수
+        self._launcher = AppLauncher()
+        self._launching = False   # 실행 중에 또 실행하지 않기 위한 표시
 
         self._build()
+        # 설정 파일 문제는 **박수를 치기 전에** 알려줘야 한다.
+        # 박수를 친 순간에야 "설정 파일이 없다"고 하면 가장 김이 새는 순간에 김이 샌다.
+        self._show_launch_targets()
         # 프로그램을 방금 켰다는 것은 쓰겠다는 뜻이므로 바로 듣기 시작한다
         self.start_listening()
 
@@ -132,6 +139,12 @@ class MainPage(ttk.Frame):
         NeoButton(row, text="마이크 변경", icon="mic",
                   command=self.on_change_device).pack(side="left")
 
+        # 박수를 쳤을 때 무엇이 실행되는지 / 실행 결과가 어땠는지를 보여주는 자리.
+        # 마이크 오류(error_label)와 섞으면 한쪽이 다른 쪽을 지워버려서 따로 뒀다.
+        self.launch_label = ttk.Label(self, text="", style="Small.TLabel",
+                                      wraplength=520, justify="left")
+        self.launch_label.pack(anchor="w", pady=(8, 0))
+
     def _device_text(self) -> str:
         mic = self.settings.device_label or "기본 장치"
         tuned = "보정됨" if self.settings.detection else "기본 기준값"
@@ -207,12 +220,80 @@ class MainPage(ttk.Frame):
 
         self._update_log(snapshot)
 
-        # 박수를 감지했으면 할 일을 마쳤으므로 곧바로 대기 상태로 돌아간다
+        # 박수를 감지했으면 할 일을 마쳤으므로 곧바로 대기 상태로 돌아간다.
+        # ⚠️ 마이크를 먼저 놓고 나서 프로그램을 실행한다. 순서를 바꾸면 실행이 끝날 때까지
+        #    마이크를 잡고 있게 되고, 그동안 들어온 소리로 또 발동할 여지가 생긴다.
         if snapshot.trigger_count > 0:
             self.stop_listening(StopReason.TRIGGERED)
+            self.launch_apps()
             return
 
         self._refresh_status()
+
+    # ── 프로그램 실행 ──────────────────────────────────────
+    def _load_apps(self):
+        """설정 파일에서 실행 목록을 읽는다. 실패하면 (None, 안내문)을 돌려준다.
+
+        박수를 칠 때마다 다시 읽는 이유: apps.yaml 을 고친 뒤 프로그램을 껐다 켜야 한다면
+        설정을 손보는 과정이 너무 번거롭다. 파일 읽기는 순식간이라 부담도 없다.
+        """
+        try:
+            return load_config().enabled_apps, ""
+        except ConfigError as exc:
+            return None, str(exc)
+
+    def _show_launch_targets(self) -> None:
+        """지금 설정대로면 무엇이 실행되는지 미리 보여준다."""
+        apps, error = self._load_apps()
+        if apps is None:
+            self.launch_label.config(text=f"⚠ {error}", foreground=theme.ERROR)
+        elif not apps:
+            self.launch_label.config(
+                text="실행할 프로그램이 없습니다. config/apps.yaml 의 apps 목록을 채워주세요.",
+                foreground=theme.FG_MUTED)
+        else:
+            names = ", ".join(app.name for app in apps)
+            self.launch_label.config(text=f"박수 치면 실행: {names}", foreground=theme.FG_MUTED)
+
+    def launch_apps(self) -> None:
+        """등록된 프로그램들을 실행한다 (박수 감지 성공 시 호출)."""
+        if self._launching:
+            return                      # 이미 실행 중이면 무시 (중복 실행 방지)
+
+        apps, error = self._load_apps()
+        if apps is None:
+            self.launch_label.config(text=f"⚠ {error}", foreground=theme.ERROR)
+            return
+        if not apps:
+            self.launch_label.config(
+                text="박수는 감지했지만 실행할 프로그램이 없습니다. config/apps.yaml 을 확인하세요.",
+                foreground=theme.WARN)
+            return
+
+        self._launching = True
+        self.launch_label.config(text=f"{len(apps)}개 실행 중…", foreground=theme.FG_MUTED)
+
+        # ⚠️ 별도 스레드에서 도는 이유: delay 옵션 때문에 항목 사이에 몇 초씩 쉬어간다.
+        #    화면 스레드에서 그대로 기다리면 그동안 창이 얼어붙어 고장 난 것처럼 보인다.
+        threading.Thread(target=self._run_launch, args=(apps,),
+                         daemon=True, name="app-launcher").start()
+
+    def _run_launch(self, apps) -> None:
+        """실행 스레드 본체. 여기서는 절대 위젯을 건드리지 않는다."""
+        try:
+            result = self._launcher.launch_all(apps)
+        finally:
+            self._launching = False
+
+        # 위젯 갱신은 반드시 화면 스레드에서. after 로 넘겨준다.
+        try:
+            self.after(0, lambda: self._show_launch_result(result))
+        except (tk.TclError, RuntimeError):
+            pass       # 실행하는 사이에 창이 닫혔다 — 알릴 곳이 없으니 조용히 끝낸다
+
+    def _show_launch_result(self, result) -> None:
+        color = theme.OK if result.ok else theme.WARN
+        self.launch_label.config(text=result.summary(), foreground=color)
 
     def _refresh_status(self) -> None:
         if self.session.armed:

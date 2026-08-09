@@ -1,6 +1,6 @@
 # 설정 파일 작성법 — `config/apps.yaml`
 
-> 최종 수정: 2026-08-08
+> 최종 수정: 2026-08-09
 
 ## 0. 설정 파일이 두 개입니다
 
@@ -44,6 +44,47 @@ copy config\apps.example.yaml config\apps.yaml
 
 > ⚠️ **다른 PC로 옮길 때 주의**: `apps.yaml`은 git으로 따라오지 않습니다.
 > 새 기기에서는 example을 다시 복사해 그 기기의 경로로 채워야 합니다.
+
+### 프로그램이 설정 파일을 찾는 순서
+
+절대 경로를 코드에 박아두지 않고, 아래 순서로 **처음 발견된 파일**을 씁니다.
+(기기마다 저장소 위치가 다르고, exe로 만들면 위치가 또 달라지기 때문입니다)
+
+| 순서 | 위치 | 언제 쓰이나 |
+|------|------|-------------|
+| 1 | 환경변수 `CLAP_LAUNCHER_CONFIG` 가 가리키는 파일 | 다른 설정으로 잠깐 돌려볼 때 |
+| 2 | `<프로그램 폴더>/config/apps.yaml` | **보통 이것** (저장소에서 개발·실행할 때) |
+| 3 | `%LOCALAPPDATA%\ClappingSetup\apps.yaml` | exe를 쓰기 금지 폴더에 설치했을 때 |
+
+지금 어떤 파일을 읽고 있는지는 아래 명령으로 확인할 수 있습니다.
+
+```powershell
+python -m clap_launcher --check-config
+```
+
+### 고쳤으면 바로 확인하세요 ⭐
+
+경로 오타는 "박수를 쳐도 아무 일도 안 일어난다"의 가장 흔한 원인입니다.
+박수를 치기 전에 두 명령으로 미리 확인하세요.
+
+```powershell
+python -m clap_launcher --check-config   # 문법·항목 검사 + 실행 목록 보기 (실행은 안 함)
+python -m clap_launcher --launch-apps    # 박수 없이 지금 바로 실행해 보기
+```
+
+```
+✅ 설정 파일을 읽었습니다: F:\dev\clapping_setup\config\apps.yaml
+
+실행 목록 (3개 켜짐 / 전체 4개):
+  ○ [exe   ] VS Code — C:/Program Files/Microsoft VS Code/Code.exe  delay=1.0s
+  ○ [url   ] 캘린더 확인 — https://calendar.google.com
+  ○ [folder] 작업 폴더 열기 — F:/dev
+  × [exe   ] Spotify — C:/.../Spotify.exe        ← × 는 enabled: false 로 꺼둔 항목
+```
+
+> 💡 **하나가 실패해도 나머지는 그대로 실행됩니다.** 실패한 항목은 이름과 이유를
+> 함께 알려주므로(`Slack: 경로를 찾을 수 없습니다: ...`) 어디를 고칠지 바로 알 수 있습니다.
+> 프로그램을 껐다 켤 필요 없이, 파일을 고치면 다음 박수부터 새 설정이 적용됩니다.
 
 ---
 
@@ -189,6 +230,13 @@ detection:
   max_interval_ms: 800
   cooldown_sec: 5.0
 ```
+
+> 🛡️ **오타는 조용히 무시하지 않고 오류로 알려줍니다.** 예를 들어 `max_harmonicty`(i 빠짐)라고
+> 적으면 "모르는 항목입니다"라며 쓸 수 있는 항목 목록을 보여줍니다.
+> 무시하고 넘어가면 "설정을 바꿨는데 왜 안 먹지?"로 시간을 날리게 되기 때문입니다.
+>
+> 하한이 상한보다 큰 조합(`min_decay_ms: 80` + `max_decay_ms: 60`)도 막습니다.
+> 그렇게 두면 **어떤 소리도 통과할 수 없어** 박수를 쳐도 영영 반응하지 않습니다.
 
 **⚠️ 여기에 '음량' 항목이 없는 것이 핵심입니다.** 판정은 전부 소리의 '모양'(비율)으로 합니다.
 리미터(클리핑 가드)가 걸린 마이크에서도 흔들리지 않게 하기 위해서입니다.

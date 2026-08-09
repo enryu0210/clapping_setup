@@ -4,10 +4,27 @@
 프로그램이 한참 돌다가 박수를 친 순간에 "경로가 없다"고 죽으면 원인을 찾기 어렵습니다.
 시작할 때 한 번에 검사하고 친절한 메시지로 알려주는 편이 훨씬 낫습니다.
 
-TODO(M4): 실제 파싱 구현.
+⚠️ 이 파일은 **읽기만** 합니다. 프로그램이 apps.yaml 을 덮어쓰면 그 안의 설명 주석이
+   전부 날아갑니다. 프로그램이 저장해야 하는 값은 settings.py(settings.json)로 갑니다.
 """
 
+import os
+import sys
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
+
+import yaml
+
+from .settings import APP_DIR_NAME
+
+CONFIG_ENV_VAR = "CLAP_LAUNCHER_CONFIG"   # 테스트·고급 사용자가 경로를 갈아끼우는 통로
+CONFIG_FILE_NAME = "apps.yaml"
+EXAMPLE_FILE_NAME = "apps.example.yaml"
+
+VALID_APP_TYPES = ("exe", "url", "folder", "store")
+
+# detection 항목 중 정수여야 하는 것들 (나머지는 실수)
+_INT_DETECTION_FIELDS = frozenset({"min_interval_ms", "max_interval_ms"})
 
 
 @dataclass
@@ -69,6 +86,8 @@ class DetectionConfig:
         """저장된 값을 되살린다. 모르는 항목은 무시하고, 빠진 항목은 기본값으로 채운다.
 
         이렇게 해두면 나중에 기준값 항목이 늘거나 줄어도 예전 보정 파일 때문에 죽지 않는다.
+        (사람이 편집하는 apps.yaml 쪽은 오타를 잡아줘야 하므로 아래 _parse_detection 에서
+         따로, 더 엄격하게 검사한다)
         """
         known = {f: data[f] for f in cls.__dataclass_fields__ if f in data}
         return cls(**known)
@@ -105,17 +124,287 @@ class Config:
     apps: list[AppEntry]
     audio: AudioConfig = field(default_factory=AudioConfig)
 
+    @property
+    def enabled_apps(self) -> list[AppEntry]:
+        """실제로 실행될 항목만. enabled: false 는 여기서 빠진다."""
+        return [app for app in self.apps if app.enabled]
+
 
 class ConfigError(Exception):
     """설정 파일이 없거나 형식이 잘못됐을 때. 메시지에 해결 방법까지 담는다."""
 
 
-def load_config(path: str) -> Config:
+# ── 설정 파일 찾기 ────────────────────────────────────────────
+
+def _app_dir() -> Path:
+    """프로그램의 기준 폴더.
+
+    ⚠️ 절대 경로를 코드에 박으면 안 된다. 기기마다 저장소 위치가 다르고,
+       나중에 exe로 묶으면 위치가 또 달라진다. 그래서 그때그때 계산한다.
+    """
+    if getattr(sys, "frozen", False):            # PyInstaller 로 만든 exe 안에서 실행 중
+        return Path(sys.executable).resolve().parent
+    # src/clap_launcher/config.py → [0]=clap_launcher, [1]=src, [2]=저장소 루트
+    return Path(__file__).resolve().parents[2]
+
+
+def config_search_paths() -> list[Path]:
+    """설정 파일을 찾아볼 곳들. 앞에 있는 것이 우선한다.
+
+    1. 환경변수 CLAP_LAUNCHER_CONFIG — 테스트와 '다른 설정으로 잠깐 돌려보기'용
+    2. 프로그램 폴더의 config/apps.yaml — 개발 중에 실제로 편집하는 파일
+    3. %LOCALAPPDATA%\\ClappingSetup\\apps.yaml — exe를 쓰기 금지 폴더에 설치했을 때의 대피처
+    """
+    override = os.environ.get(CONFIG_ENV_VAR)
+    if override:
+        return [Path(override)]
+
+    paths = [_app_dir() / "config" / CONFIG_FILE_NAME]
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        paths.append(Path(local_app_data) / APP_DIR_NAME / CONFIG_FILE_NAME)
+    return paths
+
+
+def find_config_path() -> Path | None:
+    """실제로 존재하는 설정 파일의 경로. 하나도 없으면 None."""
+    for path in config_search_paths():
+        if path.is_file():
+            return path
+    return None
+
+
+def _missing_config_message(searched: list[Path]) -> str:
+    """설정 파일이 없을 때의 안내문. '어디를 찾아봤고 무엇을 하면 되는지'까지 적는다."""
+    where = "\n".join(f"    - {path}" for path in searched)
+    return (
+        "설정 파일을 찾지 못했습니다.\n"
+        f"  찾아본 곳:\n{where}\n"
+        "  예시 파일을 복사한 뒤 본인 PC의 경로로 고쳐주세요:\n"
+        f"    copy config\\{EXAMPLE_FILE_NAME} config\\{CONFIG_FILE_NAME}"
+    )
+
+
+# ── 파싱 ─────────────────────────────────────────────────────
+
+def load_config(path: str | Path | None = None) -> Config:
     """YAML 파일을 읽어 Config 로 만든다.
 
+    Args:
+        path: 읽을 파일. None이면 config_search_paths() 에서 자동으로 찾는다.
+
     실패 시 ConfigError 를 던지며, 메시지에는 '무엇이 잘못됐고 어떻게 고치는지'를 담는다.
-      - 파일 없음  -> "config/apps.example.yaml 을 apps.yaml 로 복사하세요"
-      - 문법 오류  -> 몇 번째 줄이 문제인지
-      - 필수 키 누락 -> 어떤 항목의 어떤 키가 빠졌는지
+      - 파일 없음    -> "apps.example.yaml 을 apps.yaml 로 복사하세요"
+      - 문법 오류    -> 몇 번째 줄이 문제인지
+      - 필수 키 누락 -> 몇 번째 항목의 어떤 키가 빠졌는지
     """
-    raise NotImplementedError("TODO(M4): PyYAML 로 파싱 + 검증 구현")
+    if path is None:
+        found = find_config_path()
+        if found is None:
+            raise ConfigError(_missing_config_message(config_search_paths()))
+        target = found
+    else:
+        target = Path(path)
+
+    try:
+        text = target.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise ConfigError(_missing_config_message([target])) from None
+    except UnicodeDecodeError:
+        raise ConfigError(
+            f"설정 파일을 UTF-8로 읽지 못했습니다: {target}\n"
+            "  메모장에서 '다른 이름으로 저장' → 인코딩을 UTF-8 로 바꿔 저장해 주세요."
+        ) from None
+    except OSError as exc:
+        raise ConfigError(f"설정 파일을 열지 못했습니다: {target}\n  {exc}") from exc
+
+    try:
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"설정 파일의 YAML 문법이 잘못됐습니다: {target}\n"
+                          f"  {_yaml_error_detail(exc)}") from exc
+
+    if raw is None:            # 파일이 비었거나 주석만 있는 경우
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ConfigError(
+            f"설정 파일의 최상위는 'audio:', 'detection:', 'apps:' 같은 항목 목록이어야 합니다: {target}"
+        )
+
+    return Config(
+        detection=_parse_detection(raw.get("detection")),
+        apps=_parse_apps(raw.get("apps")),
+        audio=_parse_audio(raw.get("audio")),
+    )
+
+
+def _yaml_error_detail(exc: yaml.YAMLError) -> str:
+    """YAML 오류에서 '몇 번째 줄이 문제인지'를 뽑아낸다.
+
+    PyYAML 의 오류를 그대로 보여주면 사용자는 어디를 고쳐야 할지 알 수 없다.
+    (줄 번호가 0부터 세어져 있어서 +1 해야 편집기의 줄 번호와 맞는다)
+    """
+    mark = getattr(exc, "problem_mark", None)
+    problem = getattr(exc, "problem", None) or str(exc)
+    if mark is None:
+        return problem
+    return (f"{mark.line + 1}번째 줄 근처: {problem}\n"
+            "  들여쓰기가 어긋났거나, 경로에 따옴표를 안 씌운 경우가 대부분입니다.")
+
+
+def _parse_audio(raw) -> AudioConfig:
+    """audio: 항목. 비어 있으면 Windows 기본 장치를 쓴다."""
+    if raw is None:
+        return AudioConfig()
+    if not isinstance(raw, dict):
+        raise ConfigError("audio: 항목은 'device:' 같은 하위 항목을 가져야 합니다.")
+
+    device = raw.get("device")
+    if device is None or isinstance(device, str):
+        return AudioConfig(device=device)
+    # bool 은 파이썬에서 int 취급이라 먼저 걸러야 한다 (device: true 를 1번 장치로 읽으면 곤란)
+    if isinstance(device, bool) or not isinstance(device, int):
+        raise ConfigError(
+            f"audio.device 는 장치 번호(숫자)나 이름 일부(문자열)여야 합니다. 지금 값: {device!r}\n"
+            "  목록은 'python -m clap_launcher --list-devices' 로 볼 수 있습니다."
+        )
+    return AudioConfig(device=device)
+
+
+def _parse_detection(raw) -> DetectionConfig:
+    """detection: 항목. 생략하면 기본 기준값을 쓴다.
+
+    ⚠️ 여기는 settings.json 쪽(from_dict)과 달리 **모르는 항목을 오류로 처리한다.**
+       사람이 손으로 적는 파일이라, 오타 난 항목을 조용히 무시하면
+       "설정을 바꿨는데 왜 안 먹지?"로 몇 시간을 날리게 된다.
+    """
+    if raw is None:
+        return DetectionConfig()
+    if not isinstance(raw, dict):
+        raise ConfigError("detection: 항목은 'onset_rise_db: 8.0' 같은 하위 항목을 가져야 합니다.")
+
+    known = DetectionConfig.__dataclass_fields__
+    values: dict[str, float | int] = {}
+    for key, value in raw.items():
+        if key not in known:
+            raise ConfigError(
+                f"detection 에 모르는 항목이 있습니다: '{key}' (오타일 수 있습니다)\n"
+                f"  쓸 수 있는 항목: {', '.join(known)}"
+            )
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ConfigError(f"detection.{key} 는 숫자여야 합니다. 지금 값: {value!r}")
+        if value < 0:
+            raise ConfigError(f"detection.{key} 는 0 이상이어야 합니다. 지금 값: {value}")
+        values[key] = int(value) if key in _INT_DETECTION_FIELDS else float(value)
+
+    config = DetectionConfig(**values)
+    _check_min_max(config)
+    return config
+
+
+def _check_min_max(config: DetectionConfig) -> None:
+    """하한이 상한보다 큰 조합을 막는다.
+
+    이걸 통과시키면 어떤 소리도 통과할 수 없는 설정이 되어 "박수를 쳐도 반응이 없다"가
+    된다. 게다가 로그에는 그냥 '걸러짐'으로만 찍혀서 원인을 찾기가 매우 어렵다.
+    """
+    pairs = [
+        ("min_flatness", "max_flatness"),
+        ("min_decay_ms", "max_decay_ms"),
+        ("min_interval_ms", "max_interval_ms"),
+    ]
+    for low_key, high_key in pairs:
+        low, high = getattr(config, low_key), getattr(config, high_key)
+        if low >= high:
+            raise ConfigError(
+                f"detection.{low_key}({low}) 가 {high_key}({high}) 보다 크거나 같습니다.\n"
+                "  이렇게 두면 어떤 소리도 통과하지 못해 박수를 쳐도 반응하지 않습니다."
+            )
+
+
+def _parse_apps(raw) -> list[AppEntry]:
+    """apps: 항목. 목록 순서대로 실행된다."""
+    if raw is None:
+        return []          # 아직 등록을 안 한 상태 — 오류는 아니다. 실행할 때 안내한다.
+    if not isinstance(raw, list):
+        raise ConfigError(
+            "apps: 항목은 '- name: ...' 로 시작하는 목록이어야 합니다.\n"
+            "  각 줄 앞의 '-' 를 빠뜨리지 않았는지 확인해 주세요."
+        )
+    return [_parse_app_entry(item, order) for order, item in enumerate(raw, start=1)]
+
+
+def _parse_app_entry(raw, order: int) -> AppEntry:
+    """apps 목록의 항목 하나. 오류 메시지에 '몇 번째 항목'인지를 항상 붙인다."""
+    where = f"apps 의 {order}번째 항목"
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where}이 잘못됐습니다: 'name:', 'path:' 같은 하위 항목이 필요합니다.")
+
+    name = raw.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ConfigError(f"{where}에 name(표시할 이름)이 없습니다.")
+    name = name.strip()
+
+    app_type = raw.get("type", "exe")
+    if app_type not in VALID_APP_TYPES:
+        raise ConfigError(
+            f"'{name}' 의 type 이 잘못됐습니다: {app_type!r}\n"
+            f"  쓸 수 있는 값: {', '.join(VALID_APP_TYPES)}"
+        )
+
+    path = raw.get("path")
+    if not isinstance(path, str) or not path.strip():
+        raise ConfigError(
+            f"'{name}' 에 path 가 없습니다. (type: {app_type} 이므로 "
+            f"{_path_hint(app_type)}를 적어주세요)"
+        )
+
+    return AppEntry(
+        name=name,
+        path=path.strip(),
+        type=app_type,
+        args=_parse_args(raw.get("args"), name),
+        delay=_parse_delay(raw.get("delay"), name),
+        enabled=_parse_enabled(raw.get("enabled"), name),
+    )
+
+
+def _path_hint(app_type: str) -> str:
+    return {
+        "exe": "실행파일의 전체 경로",
+        "url": "웹 주소",
+        "folder": "폴더 경로",
+        "store": "스토어 앱 ID",
+    }[app_type]
+
+
+def _parse_args(raw, name: str) -> list[str]:
+    """args: 실행 인자. 하나만 쓸 때 목록을 빼먹기 쉬워서 문자열도 받아준다."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return [raw]        # args: "F:/dev" 처럼 적어도 동작하게 (흔한 실수)
+    if not isinstance(raw, list):
+        raise ConfigError(f"'{name}' 의 args 는 목록이어야 합니다. 예: args: [\"F:/dev\"]")
+    # 숫자를 적는 경우가 있어 문자열로 바꿔준다 (subprocess 는 문자열만 받는다)
+    return [str(item) for item in raw]
+
+
+def _parse_delay(raw, name: str) -> float:
+    """delay: 이 항목을 실행한 뒤 다음 항목까지 기다릴 초."""
+    if raw is None:
+        return 0.0
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise ConfigError(f"'{name}' 의 delay 는 초 단위 숫자여야 합니다. 지금 값: {raw!r}")
+    if raw < 0:
+        raise ConfigError(f"'{name}' 의 delay 는 0 이상이어야 합니다. 지금 값: {raw}")
+    return float(raw)
+
+
+def _parse_enabled(raw, name: str) -> bool:
+    """enabled: false 면 지우지 않고 잠시 꺼둘 수 있다."""
+    if raw is None:
+        return True
+    if not isinstance(raw, bool):
+        raise ConfigError(f"'{name}' 의 enabled 는 true 또는 false 여야 합니다. 지금 값: {raw!r}")
+    return raw

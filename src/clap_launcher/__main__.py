@@ -5,6 +5,8 @@
 
   --list-devices : 마이크 목록 보기
   --level        : 콘솔에서 실시간 음량 확인
+  --check-config : 설정 파일(apps.yaml)이 올바른지 검사
+  --launch-apps  : 박수 없이 등록된 프로그램을 지금 실행 (설정 확인용)
 """
 
 import argparse
@@ -27,6 +29,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--level", action="store_true",
         help="[디버깅] 콘솔에서 실시간 음량 미터를 켭니다.",
+    )
+    parser.add_argument(
+        "--check-config", action="store_true",
+        help="[디버깅] 설정 파일(apps.yaml)을 검사하고 실행 목록을 출력합니다.",
+    )
+    parser.add_argument(
+        "--launch-apps", action="store_true",
+        help="[디버깅] 박수 없이 등록된 프로그램을 지금 바로 실행합니다.",
     )
     parser.add_argument(
         "--reset-setup", action="store_true",
@@ -54,6 +64,13 @@ def main(argv: list[str] | None = None) -> int:
     """실행 결과를 종료 코드로 반환한다 (0=정상)."""
     force_utf8_console()
     args = _build_parser().parse_args(argv)
+
+    # 설정 관련 옵션은 마이크를 전혀 쓰지 않으므로 오디오 라이브러리를 부르기 전에 처리한다.
+    # (마이크가 없거나 고장 난 PC에서도 설정 검사는 되어야 한다)
+    if args.check_config:
+        return _check_config()
+    if args.launch_apps:
+        return _launch_apps_now()
 
     # 무거운 오디오 라이브러리는 실제로 필요할 때만 불러온다.
     # (--version, --help 만 쓰는 경우까지 sounddevice 로딩을 기다릴 이유가 없다)
@@ -89,6 +106,51 @@ def main(argv: list[str] | None = None) -> int:
 
     # 옵션이 없으면 GUI를 띄운다 (일반 사용자가 실행하는 경로)
     return _run_gui()
+
+
+def _check_config() -> int:
+    """설정 파일을 검사만 하고 결과를 보여준다. 아무것도 실행하지 않는다."""
+    from .config import ConfigError, find_config_path, load_config
+
+    try:
+        config = load_config()
+    except ConfigError as exc:
+        print(f"\n❌ {exc}", file=sys.stderr)
+        return 1
+
+    print(f"✅ 설정 파일을 읽었습니다: {find_config_path()}")
+    if not config.apps:
+        print("   ⚠ apps 목록이 비어 있습니다. 박수를 쳐도 실행할 것이 없습니다.")
+        return 0
+
+    print(f"\n실행 목록 ({len(config.enabled_apps)}개 켜짐 / 전체 {len(config.apps)}개):")
+    for entry in config.apps:
+        mark = "○" if entry.enabled else "×"    # × 는 enabled: false 로 꺼둔 항목
+        extra = f"  delay={entry.delay}s" if entry.delay else ""
+        print(f"  {mark} [{entry.type:6s}] {entry.name} — {entry.path}{extra}")
+    return 0
+
+
+def _launch_apps_now() -> int:
+    """박수 없이 지금 바로 실행해 본다. 경로가 맞는지 확인하는 가장 빠른 방법이다."""
+    from .config import ConfigError, load_config
+    from .launcher.app_launcher import AppLauncher
+
+    try:
+        config = load_config()
+    except ConfigError as exc:
+        print(f"\n❌ {exc}", file=sys.stderr)
+        return 1
+
+    if not config.enabled_apps:
+        print("실행할 프로그램이 없습니다. config/apps.yaml 의 apps 목록을 확인하세요.")
+        return 1
+
+    print(f"{len(config.enabled_apps)}개를 실행합니다…")
+    result = AppLauncher().launch_all(config.apps)
+    print(result.summary())
+    # 하나라도 실패하면 종료 코드로 알린다 (스크립트에서 확인하기 좋게)
+    return 0 if result.ok else 1
 
 
 def _run_gui() -> int:

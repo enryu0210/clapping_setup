@@ -21,7 +21,7 @@ from .device_page import DevicePage
 from .main_page import MainPage
 
 WINDOW_TITLE = "Clapping Setup"
-WINDOW_SIZE = "620x730"
+WINDOW_SIZE = "620x790"   # 메인 화면에 '무엇이 실행되는지' 줄이 생겨 조금 키웠다
 UI_REFRESH_MS = 50        # 화면 갱신 주기. 20fps면 막대가 충분히 부드럽다.
 LOCK_POLL_MS = 1500       # 화면 잠금 상태를 확인하는 주기.
 # 1.5초면 충분한 이유: 잠금이 풀린 걸 1초 늦게 알아도 사용자는 아직 자리에 앉는 중이다.
@@ -53,7 +53,7 @@ class ClapLauncherApp(tk.Tk):
 
         self.title(WINDOW_TITLE)
         self.geometry(WINDOW_SIZE)
-        self.minsize(600, 690)
+        self.minsize(600, 750)
         self.configure(bg=theme.BG)
         self._setup_styles()
 

@@ -13,16 +13,8 @@ from clap_launcher.ui import icons, theme
 from clap_launcher.ui.neumorphic import _make_surface
 
 
-@pytest.fixture(scope="module")
-def root():
-    """숨긴 Tk 창 하나. 캔버스를 만들려면 창이 있어야 한다."""
-    try:
-        window = tk.Tk()
-    except tk.TclError:
-        pytest.skip("화면이 없는 환경이라 Tk를 띄울 수 없습니다")
-    window.withdraw()
-    yield window
-    window.destroy()
+# root(숨긴 Tk 창) 는 conftest.py 에 있다.
+# 파일마다 창을 따로 만들면 두 번째 창부터 실패한다 — 이유는 conftest.py 참고.
 
 
 class TestIcons:

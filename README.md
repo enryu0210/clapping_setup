@@ -41,7 +41,7 @@
 > 그래서 **리미터·클리핑 가드가 걸린 마이크**(Elgato Wave Link, 오디오 인터페이스 등)에서도
 > 동작합니다. 이유는 [docs/DETECTION.md](docs/DETECTION.md)에 정리했습니다.
 
-## 빠른 시작 (구현 완료 후 기준)
+## 빠른 시작
 
 ```powershell
 # 1. 가상환경
@@ -52,12 +52,20 @@ python -m venv .venv
 #    패키지가 src/ 아래에 있어서 이 과정을 거쳐야 `python -m` 으로 실행됩니다.
 pip install -e .
 
-# 3. 내 설정 파일 만들기 (예시 파일 복사)
+# 3. 내 설정 파일 만들기 (예시 파일 복사 후, 본인 PC의 경로로 고치기)
 copy config\apps.example.yaml config\apps.yaml
 
-# 4. 실행 (창이 뜹니다)
+# 4. 설정이 맞는지 먼저 확인 (박수 없이 바로 실행해 봅니다)
+python -m clap_launcher --check-config
+python -m clap_launcher --launch-apps
+
+# 5. 실행 (창이 뜹니다)
 python -m clap_launcher
 ```
+
+> 💡 **4번을 먼저 하세요.** 경로 오타는 박수를 백 번 쳐도 안 켜지는 원인 1위입니다.
+> `--launch-apps` 는 박수 없이 지금 바로 실행해 보므로, 어떤 항목이 왜 실패하는지
+> 몇 초 만에 알 수 있습니다.
 
 ### 화면
 
@@ -76,7 +84,19 @@ python -m clap_launcher
    듣는 시간  (1분) (3분) [5분] (10분) (무제한)   ← 고른 것만 눌려 있다
 
    ( ■ 듣기 중지 )  ( ◎ 박수 보정 )  ( ♪ 마이크 변경 )
+   박수 치면 실행: VS Code, 업무 브라우저, 작업 폴더 열기
 ```
+
+맨 아랫줄은 **지금 설정대로면 무엇이 켜지는지**를 보여줍니다. 박수를 치고 나면
+같은 자리가 결과로 바뀝니다.
+
+```
+   성공 3개                                    ← 전부 켜졌을 때
+   성공 2개 / 실패 1개 — Slack: 경로를 찾을 수 없습니다: C:\...\slack.exe
+```
+
+> 실패해도 **나머지는 그대로 켜집니다.** 경로 오타 하나 때문에 아침 준비가 통째로
+> 날아가면 안 되니까요. 실패한 항목은 이름과 이유를 함께 보여주므로 어디를 고칠지 바로 압니다.
 
 ### 첫 실행 — 마이크 고르기
 
@@ -115,6 +135,8 @@ python -m clap_launcher --list-devices   # 마이크 목록
 python -m clap_launcher --level          # 콘솔 음량 미터
 python -m clap_launcher --level --device 3
 python -m clap_launcher --reset-setup    # 마이크 선택 초기화
+python -m clap_launcher --check-config   # 설정 파일 검사 (실행은 안 함)
+python -m clap_launcher --launch-apps    # 박수 없이 지금 바로 실행해 보기
 ```
 
 ```
@@ -136,7 +158,9 @@ python -m clap_launcher --reset-setup    # 마이크 선택 초기화
 
 ## 상태
 
-🚧 **개발 중 (v0.0)** — [PLAN.md의 마일스톤](docs/PLAN.md#5-개발-단계-마일스톤) 순서대로 진행 중입니다.
+🎉 **MVP 동작 (v0.1)** — 박수 두 번이면 등록한 프로그램이 실제로 켜집니다.
+남은 것은 편의 기능(트레이)과 exe 패키징입니다.
+[PLAN.md의 마일스톤](docs/PLAN.md#5-개발-단계-마일스톤) 순서대로 진행 중입니다.
 
 | 단계 | 내용 | 상태 |
 |------|------|------|
@@ -145,8 +169,8 @@ python -m clap_launcher --reset-setup    # 마이크 선택 초기화
 | M1.5 | GUI + 마이크 선택 화면 | ✅ |
 | M2·M3 | 박수 감지 (오탐 필터 + 짝짝) | ✅ |
 | M3.5 | 듣는 시간 제한 (잠금 해제 시 자동 시작) | ✅ |
-| M4 | 프로그램 실행 연결 (MVP) | ⬅️ 다음 |
-| M5 | 트레이 아이콘·편의 기능 | ⬜ |
+| M4 | 프로그램 실행 연결 (MVP) | ✅ |
+| M5 | 트레이 아이콘·편의 기능 | ⬅️ 다음 |
 | M6 | exe 패키징 (PyInstaller) | ⬜ |
 
 ## 환경
