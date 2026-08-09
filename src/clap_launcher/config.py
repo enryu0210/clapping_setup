@@ -10,6 +10,7 @@
 
 import os
 import sys
+import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -408,3 +409,137 @@ def _parse_enabled(raw, name: str) -> bool:
     if not isinstance(raw, bool):
         raise ConfigError(f"'{name}' 의 enabled 는 true 또는 false 여야 합니다. 지금 값: {raw!r}")
     return raw
+
+
+# ── 저장 ─────────────────────────────────────────────────
+#
+# ⚠️ 원래 이 파일은 '읽기 전용'이었다. 프로그램이 apps.yaml 을 덮어쓰면 사용자가 적어둔
+#    설명 주석이 날아가기 때문이다. 그런데 프로그램 목록을 화면에서 편집할 수 있게 되면서
+#    어딘가에는 저장해야 했다. 선택지는 두 가지였다.
+#
+#      (가) 목록을 settings.json 에 따로 저장한다  → 설정이 두 군데로 갈라진다.
+#           손으로 apps.yaml 을 고쳤는데 화면이 무시하는 상황이 생긴다.
+#      (나) apps.yaml 을 다시 쓴다                → 주석이 날아간다.
+#
+#    (나)를 골랐다. '설정 파일은 하나'라는 게 훨씬 중요하고, 주석 문제는
+#    **직전 파일을 .bak 으로 남기는 것**으로 되돌릴 수 있게 했다.
+#    대신 화면에도 이 사실을 분명히 적어둔다.
+
+BACKUP_SUFFIX = ".bak"
+
+_FILE_HEADER = """\
+# ================================================================
+#  Clapping Setup 설정
+#
+#  ⚠️ 이 파일은 프로그램의 [프로그램 설정] 화면에서 저장할 때 **다시 작성**됩니다.
+#     직접 적어둔 주석은 그때 사라집니다. 직전 내용은 apps.yaml.bak 에 남습니다.
+#     손으로만 관리하고 싶다면 화면에서 저장하지 말고 이 파일만 편집하세요.
+#
+#  자세한 설명은 docs/CONFIG.md 참고.
+# ================================================================
+"""
+
+
+def dump_config_text(config: Config) -> str:
+    """Config 를 apps.yaml 파일 내용(문자열)으로 만든다.
+
+    파일을 건드리지 않는 순수 함수라 테스트하기 쉽다.
+    항목은 **기본값과 다른 것만** 적는다. 전부 적으면 읽기 어려워지기 때문이다.
+    """
+    parts = [_FILE_HEADER]
+
+    # ── audio ──
+    if config.audio.device is None:
+        parts.append("\n# 쓸 마이크 (비워두면 Windows 기본 장치. 보통은 화면에서 고른다)\n"
+                     "audio:\n  device:\n")
+    else:
+        parts.append("\n# 쓸 마이크\n" + _yaml_block({"audio": {"device": config.audio.device}}))
+
+    # ── detection ──
+    parts.append("\n# 박수 감지 기준값 — 보통은 [박수 보정] 버튼을 쓰세요.\n"
+                 "# 각 값의 근거는 docs/DETECTION.md 참고.\n")
+    parts.append(_yaml_block({"detection": config.detection.to_dict()}))
+
+    # ── apps ──
+    parts.append("\n# 박수 치면 실행할 것들 (위에서 아래 순서대로 실행)\n")
+    if not config.apps:
+        parts.append("apps: []\n")
+    else:
+        parts.append(_yaml_block({"apps": [_app_to_dict(app) for app in config.apps]}))
+    return "".join(parts)
+
+
+def _app_to_dict(app: AppEntry) -> dict:
+    """항목 하나를 사전으로. 기본값인 항목은 빼서 파일을 짧게 유지한다."""
+    data = {"name": app.name, "type": app.type, "path": app.path}
+    if app.args:
+        data["args"] = list(app.args)
+    if app.delay:
+        data["delay"] = app.delay
+    if not app.enabled:
+        data["enabled"] = False
+    return data
+
+
+def _yaml_block(data: dict) -> str:
+    """사전 하나를 YAML 조각으로. 한글이 깨지지 않게, 적은 순서 그대로 쓴다."""
+    return yaml.safe_dump(data, allow_unicode=True, sort_keys=False,
+                          default_flow_style=False, width=1000)
+
+
+def save_config(config: Config, path: str | Path | None = None) -> Path:
+    """설정을 파일에 쓴다.
+
+    Args:
+        path: 저장할 위치. None이면 지금 읽고 있는 파일, 그것도 없으면 첫 번째 후보 경로.
+
+    Returns:
+        실제로 저장한 경로.
+
+    Raises:
+        ConfigError: 어디에도 쓸 수 없을 때 (권한 문제 등). 메시지에 이유를 담는다.
+    """
+    text = dump_config_text(config)
+
+    if path is not None:
+        return _write_config_file(Path(path), text)
+
+    # 후보를 순서대로 시도한다. exe를 '쓰기 금지' 폴더에 설치하면 첫 후보가 실패하는데,
+    # 그때 조용히 포기하지 않고 사용자 폴더(%LOCALAPPDATA%)로 물러선다.
+    candidates = [p for p in config_search_paths() if p.is_file()] or config_search_paths()
+    problems = []
+    for candidate in candidates:
+        try:
+            return _write_config_file(candidate, text)
+        except OSError as exc:
+            problems.append(f"  - {candidate}: {exc}")
+
+    raise ConfigError("설정을 저장할 수 없습니다. 아래 위치에 모두 실패했습니다.\n"
+                      + "\n".join(problems))
+
+
+def _write_config_file(path: Path, text: str) -> Path:
+    """실제 쓰기. 직전 파일을 백업하고, 도중에 죽어도 파일이 반토막 나지 않게 한다."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 직전 내용을 남긴다. 화면에서 실수로 저장했을 때 되돌릴 유일한 방법이다.
+    if path.is_file():
+        try:
+            backup = path.with_suffix(path.suffix + BACKUP_SUFFIX)
+            backup.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+        except OSError:
+            pass      # 백업 실패가 저장 자체를 막을 이유는 없다
+
+    # 임시 파일에 다 쓴 뒤 이름을 바꿔치기한다 (settings.py 와 같은 방식)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        os.replace(tmp_name, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+    return path

@@ -32,23 +32,17 @@ def _hex_to_rgb(color: str) -> tuple[int, int, int]:
     return tuple(int(color[i:i + 2], 16) for i in (0, 2, 4))
 
 
-def _rounded_mask(size: tuple[int, int], radius: int,
-                  offset: tuple[int, int] = (0, 0)) -> "Image.Image":
-    """둥근 사각형 모양의 흑백 판(마스크)을 만든다. 그림자 계산의 재료."""
-    mask = Image.new("L", size, 0)
-    draw = ImageDraw.Draw(mask)
-    left, top = offset
-    draw.rounded_rectangle(
-        [left, top, left + size[0] - 1 - abs(offset[0]) * 0,
-         top + size[1] - 1 - abs(offset[1]) * 0],
-        radius=radius, fill=255,
-    )
-    return mask
+SUPERSAMPLE = 3   # 몇 배로 크게 그린 뒤 줄일지 (둥근 모서리의 계단 현상 제거용)
 
 
 def _make_surface(width: int, height: int, radius: int, raised: bool,
                   fill: str, offset: int, blur: int) -> "ImageTk.PhotoImage | None":
     """뉴모피즘 표면 이미지를 만든다.
+
+    ⚠️ 크게 그린 뒤 줄이는(supersampling) 이유:
+    Pillow의 도형 그리기에도 안티앨리어싱이 없다. 둥근 사각형을 실제 크기로 그리면
+    모서리가 계단처럼 각져 보인다. 3배로 그린 뒤 줄이면 그 계단이 섞여 매끈해진다.
+    이미지는 캐시되므로 비용은 처음 한 번뿐이다.
 
     Args:
         raised: True면 튀어나온 모양, False면 움푹 들어간 모양
@@ -65,37 +59,44 @@ def _make_surface(width: int, height: int, radius: int, raised: bool,
         return _IMAGE_CACHE[key]
 
     pad = blur * 2 + offset          # 그림자가 번질 여백
-    canvas_size = (width + pad * 2, height + pad * 2)
+    final_size = (width + pad * 2, height + pad * 2)
+
+    # 여기서부터는 전부 SUPERSAMPLE 배 확대된 크기로 계산한다
+    ss = SUPERSAMPLE
+    canvas_size = (final_size[0] * ss, final_size[1] * ss)
+    big_offset, big_blur = offset * ss, blur * ss
     base = Image.new("RGB", canvas_size, _hex_to_rgb(theme.BG))
-    shape_box = [pad, pad, pad + width - 1, pad + height - 1]
+    shape_box = [pad * ss, pad * ss,
+                 (pad + width) * ss - 1, (pad + height) * ss - 1]
 
     shape = Image.new("L", canvas_size, 0)
-    ImageDraw.Draw(shape).rounded_rectangle(shape_box, radius=radius, fill=255)
+    ImageDraw.Draw(shape).rounded_rectangle(shape_box, radius=radius * ss, fill=255)
 
     if raised:
         # 튀어나온 모양: 도형 뒤로 두 방향의 그림자를 깐 뒤 도형을 덮는다
-        for color, dx, dy in ((theme.DARK, offset, offset),
-                              (theme.LIGHT, -offset, -offset)):
+        for color, dx, dy in ((theme.DARK, big_offset, big_offset),
+                              (theme.LIGHT, -big_offset, -big_offset)):
             shadow = shape.transform(
                 canvas_size, Image.AFFINE, (1, 0, -dx, 0, 1, -dy), fillcolor=0
-            ).filter(ImageFilter.GaussianBlur(blur))
+            ).filter(ImageFilter.GaussianBlur(big_blur))
             base.paste(Image.new("RGB", canvas_size, _hex_to_rgb(color)), (0, 0), shadow)
         base.paste(Image.new("RGB", canvas_size, _hex_to_rgb(fill)), (0, 0), shape)
     else:
         # 움푹 들어간 모양: 도형을 먼저 깔고, 그 **안쪽에** 그림자를 그린다.
         # 안쪽 그림자 = (도형) - (도형을 살짝 민 것) → 한쪽 가장자리에만 남는 띠
         base.paste(Image.new("RGB", canvas_size, _hex_to_rgb(fill)), (0, 0), shape)
-        for color, dx, dy in ((theme.DARK, offset, offset),
-                              (theme.LIGHT, -offset, -offset)):
+        for color, dx, dy in ((theme.DARK, big_offset, big_offset),
+                              (theme.LIGHT, -big_offset, -big_offset)):
             shifted = shape.transform(
                 canvas_size, Image.AFFINE, (1, 0, -dx, 0, 1, -dy), fillcolor=0
             )
-            ring = ImageChops.subtract(shape, shifted).filter(ImageFilter.GaussianBlur(blur))
+            ring = ImageChops.subtract(shape, shifted).filter(
+                ImageFilter.GaussianBlur(big_blur))
             ring = ImageChops.multiply(ring, shape)   # 도형 밖으로 새어 나가지 않게 자른다
             base.paste(Image.new("RGB", canvas_size, _hex_to_rgb(color)), (0, 0), ring)
 
     try:
-        photo = ImageTk.PhotoImage(base)
+        photo = ImageTk.PhotoImage(base.resize(final_size, Image.LANCZOS))
     except Exception:
         # 이미지를 Tk에 올리지 못하는 상황(창이 아직 없거나 Tk 이미지 한도 초과 등).
         # 그림자는 어차피 장식이므로, 죽는 대신 None을 돌려주고 납작하게 그리게 한다.
@@ -105,23 +106,32 @@ def _make_surface(width: int, height: int, radius: int, raised: bool,
     return photo
 
 
+def shadow_pad() -> int:
+    """그림자가 번질 여백(실제 픽셀). 위젯들이 자기 크기를 잡을 때 쓴다."""
+    return theme.px(theme.SHADOW_BLUR) * 2 + theme.px(theme.SHADOW_OFFSET)
+
+
 class NeoSurface(tk.Canvas):
     """뉴모피즘 표면 하나. 패널·버튼·미터가 모두 이걸 바탕으로 만들어진다.
 
     캔버스를 쓰는 이유: 이미지를 깔고 그 위에 글자와 아이콘을 자유롭게 얹어야 하는데,
     일반 위젯(Frame, Button)으로는 그림자 이미지를 배경으로 깔 수 없다.
+
+    ⚠️ 크기는 **96 DPI 기준 값**으로 받는다. 실제 화면 배율은 안에서 곱한다.
+       (부르는 쪽은 화면 배율을 신경 쓰지 않아도 된다)
     """
 
     def __init__(self, parent, width: int, height: int, radius: int = theme.RADIUS_SMALL,
                  raised: bool = True, fill: str | None = None, **kwargs) -> None:
-        self.pad = theme.SHADOW_BLUR * 2 + theme.SHADOW_OFFSET
+        self.pad = shadow_pad()
+        self.surface_width = theme.px(width)
+        self.surface_height = theme.px(height)
+        self.radius = theme.px(radius)
         super().__init__(
-            parent, width=width + self.pad * 2, height=height + self.pad * 2,
+            parent, width=self.surface_width + self.pad * 2,
+            height=self.surface_height + self.pad * 2,
             bg=theme.BG, highlightthickness=0, bd=0, **kwargs,
         )
-        self.surface_width = width
-        self.surface_height = height
-        self.radius = radius
         self.fill_color = fill or theme.BG
         self._raised = raised
         self._image = None
@@ -131,7 +141,7 @@ class NeoSurface(tk.Canvas):
     def _draw_surface(self) -> None:
         photo = _make_surface(self.surface_width, self.surface_height, self.radius,
                               self._raised, self.fill_color,
-                              theme.SHADOW_OFFSET, theme.SHADOW_BLUR)
+                              theme.px(theme.SHADOW_OFFSET), theme.px(theme.SHADOW_BLUR))
         if photo is not None:
             self._image = photo      # 참조를 들고 있어야 한다. 안 그러면 가비지 컬렉션돼 사라진다
             if self._image_id is None:
@@ -170,8 +180,10 @@ class NeoButton(NeoSurface):
     """
 
     ICON_SIZE = 16
-    GAP = 7            # 아이콘과 글자 사이
-    SIDE_PADDING = 16
+    GAP = 6            # 아이콘과 글자 사이
+    # 좌우 여백. 넉넉할수록 보기 좋지만, 버튼 네 개를 한 줄에 놓으면 창을 넘어간다
+    # (보정 화면의 '취소' 버튼이 실제로 잘렸다). 여기가 그 균형점이다.
+    SIDE_PADDING = 13
 
     def __init__(self, parent, text: str = "", icon: str | None = None,
                  command=None, accent: bool = False, width: int | None = None,
@@ -201,9 +213,15 @@ class NeoButton(NeoSurface):
         self.bind("<ButtonRelease-1>", self._on_release)
 
     def _natural_width(self) -> int:
-        text_width = self._font.measure(self.text) if self.text else 0
+        """버튼 너비를 글자 길이에 맞춘다 (96 DPI 기준 값으로 돌려준다).
+
+        ⚠️ font.measure 는 **실제 픽셀**을 준다. 나머지 값은 96 DPI 기준이므로
+           unpx 로 단위를 맞춰야 한다. 안 그러면 고해상도 화면에서 배율이 두 번 곱해져
+           버튼만 터무니없이 길어진다.
+        """
+        text_width = theme.unpx(self._font.measure(self.text)) if self.text else 0
         icon_width = (self.ICON_SIZE + self.GAP) if self.icon_name else 0
-        return text_width + icon_width + self.SIDE_PADDING * 2
+        return int(round(text_width + icon_width + self.SIDE_PADDING * 2))
 
     # 밖에서 글자색을 직접 지정하고 싶을 때 쓴다 (예: 묶음 버튼의 선택 표시)
     text_color: str | None = None
@@ -221,16 +239,18 @@ class NeoButton(NeoSurface):
             self.delete(item)
         self._items = []
 
+        # 여기서부터는 캔버스에 실제로 찍는 좌표라 전부 실제 픽셀로 계산한다
         color = self._content_color()
         nudge = 1 if self._pressed else 0
+        icon_size = theme.px(self.ICON_SIZE)
         text_width = self._font.measure(self.text) if self.text else 0
-        icon_width = (self.ICON_SIZE + self.GAP) if self.icon_name else 0
+        icon_width = (icon_size + theme.px(self.GAP)) if self.icon_name else 0
         start_x = self.cx - (text_width + icon_width) / 2
 
         if self.icon_name:
             self._items += icons.draw(
-                self, self.icon_name, start_x + self.ICON_SIZE / 2, self.cy + nudge,
-                self.ICON_SIZE, color, width=2,
+                self, self.icon_name, start_x + icon_size / 2, self.cy + nudge,
+                icon_size, color, width=2,
             )
         if self.text:
             self._items.append(self.create_text(
@@ -301,25 +321,33 @@ class NeoToggle(tk.Canvas):
     KNOB_MARGIN = 3
 
     def __init__(self, parent, text: str, value: bool = False, command=None, **kwargs):
-        self.pad = theme.SHADOW_BLUR * 2 + theme.SHADOW_OFFSET
         from tkinter import font as tkfont
-        font = tkfont.Font(font=theme.FONT_BODY)
-        total_width = self.pad * 2 + self.TRACK_WIDTH + 10 + font.measure(text)
 
-        super().__init__(parent, width=total_width, height=self.TRACK_HEIGHT + self.pad * 2,
+        # 이 위젯은 NeoSurface 가 아니라 맨 캔버스라 배율을 직접 곱해준다
+        self.pad = shadow_pad()
+        self.track_w = theme.px(self.TRACK_WIDTH)
+        self.track_h = theme.px(self.TRACK_HEIGHT)
+        self.knob_margin = theme.px(self.KNOB_MARGIN)
+        gap = theme.px(10)
+
+        font = tkfont.Font(font=theme.FONT_BODY)
+        total_width = self.pad * 2 + self.track_w + gap + font.measure(text)
+
+        super().__init__(parent, width=total_width, height=self.track_h + self.pad * 2,
                          bg=theme.BG, highlightthickness=0, bd=0, **kwargs)
         self.value = value
         self.command = command
 
         self._track_image = _make_surface(
-            self.TRACK_WIDTH, self.TRACK_HEIGHT, self.TRACK_HEIGHT // 2, False,
-            theme.BG_SUNKEN, theme.SHADOW_OFFSET - 1, theme.SHADOW_BLUR - 2)
+            self.track_w, self.track_h, self.track_h // 2, False, theme.BG_SUNKEN,
+            max(1, theme.px(theme.SHADOW_OFFSET - 1)),
+            max(1, theme.px(theme.SHADOW_BLUR - 2)))
         if self._track_image is not None:
             self.create_image(0, 0, image=self._track_image, anchor="nw")
 
         self._fill = self.create_oval(0, 0, 0, 0, outline="", fill=theme.ACCENT)
         self._knob = self.create_oval(0, 0, 0, 0, outline=theme.DARK, fill=theme.BG)
-        self.create_text(self.pad + self.TRACK_WIDTH + 10, self.pad + self.TRACK_HEIGHT / 2,
+        self.create_text(self.pad + self.track_w + gap, self.pad + self.track_h / 2,
                          text=text, anchor="w", fill=theme.FG, font=theme.FONT_BODY)
 
         self._redraw()
@@ -328,16 +356,17 @@ class NeoToggle(tk.Canvas):
         self.bind("<Leave>", lambda _e: self.config(cursor=""))
 
     def _redraw(self) -> None:
-        size = self.TRACK_HEIGHT - self.KNOB_MARGIN * 2
-        left = self.pad + self.KNOB_MARGIN
-        right = self.pad + self.TRACK_WIDTH - self.KNOB_MARGIN - size
+        size = self.track_h - self.knob_margin * 2
+        left = self.pad + self.knob_margin
+        right = self.pad + self.track_w - self.knob_margin - size
         x = right if self.value else left
-        top = self.pad + self.KNOB_MARGIN
+        top = self.pad + self.knob_margin
 
         # 켜져 있으면 트랙 안쪽을 강조색으로 채운다
         if self.value:
-            self.coords(self._fill, self.pad + 2, self.pad + 2,
-                        self.pad + self.TRACK_WIDTH - 2, self.pad + self.TRACK_HEIGHT - 2)
+            inset = theme.px(2)
+            self.coords(self._fill, self.pad + inset, self.pad + inset,
+                        self.pad + self.track_w - inset, self.pad + self.track_h - inset)
         else:
             self.coords(self._fill, 0, 0, 0, 0)   # 화면 밖으로 치워 감춘다
 
@@ -371,25 +400,42 @@ class NeoSegmented(tk.Frame):
             options: (보여줄 글자, 실제 값) 목록
             value: 처음 선택된 값
         """
+        from tkinter import font as tkfont
+
         super().__init__(parent, bg=theme.BG, **kwargs)
         self.value = value
         self.command = command
         self._buttons: dict[float, NeoButton] = {}
 
+        # 칸 너비를 가장 긴 글자에 맞춰 통일한다.
+        # 글자 수로 어림잡던 예전 방식은 한글·화면 배율에 따라 글자가 잘렸다.
+        font = tkfont.Font(font=theme.FONT_BUTTON)
+        widest = max(theme.unpx(font.measure(label)) for label, _v in options)
+        button_width = int(round(widest)) + 20
+
         for label, option_value in options:
             button = NeoButton(
-                self, text=label, height=30, width=max(42, len(label) * 11 + 18),
+                self, text=label, height=30, width=button_width,
                 command=lambda v=option_value: self._select(v),
             )
             button.pack(side="left", padx=0)
             self._buttons[option_value] = button
         self._refresh()
 
-    def _select(self, value: float) -> None:
+    def _select(self, value) -> None:
         self.value = value
         self._refresh()
         if self.command is not None:
             self.command()
+
+    def set(self, value) -> None:
+        """밖에서 값을 바꾼다. 목록에서 다른 항목을 골랐을 때처럼.
+
+        _select 와 달리 command 를 부르지 않는다. 화면이 값을 채워 넣는 것과
+        사용자가 직접 누른 것은 구분해야 하기 때문이다(안 그러면 저장이 계속 일어난다).
+        """
+        self.value = value
+        self._refresh()
 
     def _refresh(self) -> None:
         """고른 것은 움푹 들어가고 글자도 강조색이 된다.
@@ -414,11 +460,15 @@ class IconLabel(tk.Canvas):
     def __init__(self, parent, width: int, icon: str = "dot", text: str = "",
                  color: str = theme.FG, font=theme.FONT_BODY, icon_size: int = 18,
                  **kwargs) -> None:
-        height = max(icon_size, 20) + 6
-        super().__init__(parent, width=width, height=height, bg=theme.BG,
+        self._icon_size = theme.px(icon_size)
+        # 글자가 잘리지 않도록 세로 크기는 아이콘과 글자 중 큰 쪽에 맞춘다
+        from tkinter import font as tkfont
+        line_height = tkfont.Font(font=font).metrics("linespace")
+        height = max(self._icon_size, line_height) + theme.px(6)
+
+        super().__init__(parent, width=theme.px(width), height=height, bg=theme.BG,
                          highlightthickness=0, bd=0, **kwargs)
-        self._width = width
-        self._icon_size = icon_size
+        self._width = theme.px(width)
         self._font = font
         self._items: list[int] = []
         self.set(text, icon, color)
@@ -429,11 +479,11 @@ class IconLabel(tk.Canvas):
         self._items = []
 
         middle = self.winfo_reqheight() / 2
-        x = 2
+        x = theme.px(2)
         if icon:
             self._items += icons.draw(self, icon, x + self._icon_size / 2, middle,
                                       self._icon_size, color, width=2)
-            x += self._icon_size + 8
+            x += self._icon_size + theme.px(8)
         self._items.append(self.create_text(x, middle, text=text, anchor="w",
                                             fill=color, font=self._font))
 
@@ -447,7 +497,9 @@ class NeoPanel(tk.Frame):
     def __init__(self, parent, width: int, height: int,
                  radius: int = theme.RADIUS_LARGE, padding: int = 12, **kwargs) -> None:
         super().__init__(parent, bg=theme.BG, **kwargs)
-        self.pad = theme.SHADOW_BLUR * 2 + theme.SHADOW_OFFSET
+        self.pad = shadow_pad()
+        width, height = theme.px(width), theme.px(height)
+        radius, padding = theme.px(radius), theme.px(padding)
 
         self._canvas = tk.Canvas(
             self, width=width + self.pad * 2, height=height + self.pad * 2,
@@ -455,7 +507,8 @@ class NeoPanel(tk.Frame):
         )
         self._canvas.pack()
         self._image = _make_surface(width, height, radius, False, theme.BG_SUNKEN,
-                                    theme.SHADOW_OFFSET, theme.SHADOW_BLUR)
+                                    theme.px(theme.SHADOW_OFFSET),
+                                    theme.px(theme.SHADOW_BLUR))
         if self._image is not None:
             self._canvas.create_image(0, 0, image=self._image, anchor="nw")
         else:

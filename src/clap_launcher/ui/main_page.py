@@ -42,12 +42,13 @@ class MainPage(ttk.Frame):
     """듣기 상태 관리 + 감지 로그 화면."""
 
     def __init__(self, parent, monitor: AudioMonitor, settings,
-                 on_change_device, on_calibrate) -> None:
-        super().__init__(parent, padding=(24, 20))
+                 on_change_device, on_calibrate, on_edit_apps=None) -> None:
+        super().__init__(parent, padding=(theme.px(24), theme.px(18)))
         self.monitor = monitor
         self.settings = settings
         self.on_change_device = on_change_device
         self.on_calibrate = on_calibrate
+        self.on_edit_apps = on_edit_apps
 
         self.session = ListeningSession()
         self._shown_events = 0    # 로그에 이미 그린 이벤트의 누적 개수
@@ -67,13 +68,13 @@ class MainPage(ttk.Frame):
 
         self.status_label = IconLabel(self, width=520, icon="headphones", text="",
                                       color=theme.OK, font=theme.FONT_HEADING, icon_size=20)
-        self.status_label.pack(anchor="w", pady=(10, 0))
+        self.status_label.pack(anchor="w", pady=(theme.px(8), 0))
 
-        self.reason_label = ttk.Label(self, text="", style="Muted.TLabel", wraplength=520,
-                                      justify="left")
-        self.reason_label.pack(anchor="w", pady=(2, 2))
+        self.reason_label = ttk.Label(self, text="", style="Muted.TLabel",
+                                      wraplength=theme.px(520), justify="left")
+        self.reason_label.pack(anchor="w", pady=(theme.px(2), theme.px(2)))
         self.device_label = ttk.Label(self, text=self._device_text(), style="Small.TLabel")
-        self.device_label.pack(anchor="w", pady=(2, 6))
+        self.device_label.pack(anchor="w", pady=(theme.px(2), theme.px(6)))
 
         # ── 음량 미터 ──
         meter_row = ttk.Frame(self)
@@ -81,25 +82,28 @@ class MainPage(ttk.Frame):
         self.meter = LevelMeter(meter_row)
         self.meter.pack(side="left")
         self.level_label = ttk.Label(meter_row, text="  --.- dBFS", style="Mono.TLabel")
-        self.level_label.pack(side="left", padx=(6, 0))
+        self.level_label.pack(side="left", padx=(theme.px(6), 0))
 
         self._build_log()
         self._build_options()
         self._build_buttons()
 
     def _build_header(self) -> None:
-        header = tk.Canvas(self, width=520, height=38, bg=theme.BG,
+        # 캔버스에 직접 찍는 좌표라 전부 실제 픽셀로 바꿔서 쓴다
+        size = theme.px(30)
+        header = tk.Canvas(self, width=theme.px(520), height=theme.px(40), bg=theme.BG,
                            highlightthickness=0, bd=0)
         header.pack(anchor="w")
-        icons.draw(header, "clap", 16, 19, 28, theme.ACCENT, width=2)
-        header.create_text(40, 20, text="Clapping Setup", anchor="w",
+        icons.draw(header, "clap", size / 2 + theme.px(2), theme.px(20), size,
+                   theme.ACCENT, width=2)
+        header.create_text(theme.px(42), theme.px(21), text="Clapping Setup", anchor="w",
                            fill=theme.FG, font=theme.FONT_TITLE)
 
     def _build_log(self) -> None:
         ttk.Label(self, text="들린 소리 (걸러진 것 포함)", style="Small.TLabel").pack(
-            anchor="w", pady=(12, 4))
+            anchor="w", pady=(theme.px(10), theme.px(4)))
 
-        panel = NeoPanel(self, width=520, height=150, padding=10)
+        panel = NeoPanel(self, width=520, height=128, padding=10)
         panel.pack(anchor="w")
         self.log = tk.Listbox(
             panel.body, activestyle="none", bg=theme.BG_SUNKEN, fg=theme.FG_MUTED,
@@ -108,7 +112,8 @@ class MainPage(ttk.Frame):
         )
         self.log.pack(fill="both", expand=True)
 
-        self.error_label = ttk.Label(self, text="", style="Muted.TLabel", wraplength=520)
+        self.error_label = ttk.Label(self, text="", style="Muted.TLabel",
+                                     wraplength=theme.px(520))
         self.error_label.pack(anchor="w")
 
     def _build_options(self) -> None:
@@ -117,11 +122,12 @@ class MainPage(ttk.Frame):
             self, text="화면 잠금을 풀면 자동으로 듣기 시작",
             value=self.settings.auto_arm_on_unlock, command=self._save_options,
         )
-        self.auto_arm_toggle.pack(anchor="w", pady=(8, 0))
+        self.auto_arm_toggle.pack(anchor="w", pady=(theme.px(6), 0))
 
         row = ttk.Frame(self)
-        row.pack(anchor="w", pady=(2, 6))
-        ttk.Label(row, text="듣는 시간", style="Small.TLabel").pack(side="left", padx=(2, 8))
+        row.pack(anchor="w", pady=(theme.px(2), theme.px(4)))
+        ttk.Label(row, text="듣는 시간", style="Small.TLabel").pack(
+            side="left", padx=(theme.px(2), theme.px(8)))
         self.timeout_picker = NeoSegmented(
             row, options=TIMEOUT_OPTIONS, value=self.settings.listen_timeout_min,
             command=self._save_options,
@@ -129,21 +135,36 @@ class MainPage(ttk.Frame):
         self.timeout_picker.pack(side="left")
 
     def _build_buttons(self) -> None:
-        row = ttk.Frame(self)
-        row.pack(anchor="w", pady=(4, 0))
-        self.toggle_button = NeoButton(row, text="듣기 중지", icon="stop",
+        """버튼을 두 줄로 나눈 이유: 네 개를 한 줄에 두면 창 너비를 넘어 잘린다.
+        자주 쓰는 것(듣기·프로그램 설정)을 윗줄에 둔다."""
+        top = ttk.Frame(self)
+        top.pack(anchor="w", pady=(theme.px(4), 0))
+        self.toggle_button = NeoButton(top, text="듣기 중지", icon="stop",
                                        command=self._toggle_listening, accent=True)
         self.toggle_button.pack(side="left")
-        NeoButton(row, text="박수 보정", icon="target",
+        NeoButton(top, text="프로그램 설정", icon="list",
+                  command=self._open_apps_page).pack(side="left")
+
+        bottom = ttk.Frame(self)
+        bottom.pack(anchor="w")
+        NeoButton(bottom, text="박수 보정", icon="target",
                   command=self.on_calibrate).pack(side="left")
-        NeoButton(row, text="마이크 변경", icon="mic",
+        NeoButton(bottom, text="마이크 변경", icon="mic",
                   command=self.on_change_device).pack(side="left")
 
         # 박수를 쳤을 때 무엇이 실행되는지 / 실행 결과가 어땠는지를 보여주는 자리.
         # 마이크 오류(error_label)와 섞으면 한쪽이 다른 쪽을 지워버려서 따로 뒀다.
         self.launch_label = ttk.Label(self, text="", style="Small.TLabel",
-                                      wraplength=520, justify="left")
-        self.launch_label.pack(anchor="w", pady=(8, 0))
+                                      wraplength=theme.px(520), justify="left")
+        self.launch_label.pack(anchor="w", pady=(theme.px(8), 0))
+
+    def _open_apps_page(self) -> None:
+        """프로그램 목록 편집 화면으로 넘어간다. 마이크는 잡고 있을 이유가 없으니 놓는다."""
+        if self.on_edit_apps is None:
+            return
+        if self.session.armed:
+            self.stop_listening(StopReason.MANUAL)
+        self.on_edit_apps()
 
     def _device_text(self) -> str:
         mic = self.settings.device_label or "기본 장치"

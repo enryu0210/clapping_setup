@@ -32,7 +32,7 @@ class DevicePage(ttk.Frame):
             settings: 현재 설정. 고른 마이크를 여기에 적어 저장한다.
             on_done: 선택이 끝났을 때 부를 함수 (메인 화면으로 넘어가기)
         """
-        super().__init__(parent, padding=(24, 20))
+        super().__init__(parent, padding=(theme.px(24), theme.px(18)))
         self.monitor = monitor
         self.settings = settings
         self.on_done = on_done
@@ -43,11 +43,11 @@ class DevicePage(ttk.Frame):
 
     # ── 화면 구성 ──────────────────────────────────────────
     def _build(self) -> None:
-        header = tk.Canvas(self, width=PANEL_WIDTH, height=38, bg=theme.BG,
+        header = tk.Canvas(self, width=theme.px(PANEL_WIDTH), height=theme.px(40), bg=theme.BG,
                            highlightthickness=0, bd=0)
         header.pack(anchor="w")
-        icons.draw(header, "mic", 16, 19, 26, theme.ACCENT, width=2)
-        header.create_text(38, 20, text="사용할 마이크를 고르세요", anchor="w",
+        icons.draw(header, "mic", theme.px(16), theme.px(20), theme.px(26), theme.ACCENT, width=2)
+        header.create_text(theme.px(38), theme.px(21), text="사용할 마이크를 고르세요", anchor="w",
                            fill=theme.FG, font=theme.FONT_TITLE)
 
         ttk.Label(
@@ -55,10 +55,10 @@ class DevicePage(ttk.Frame):
             text="목록에서 마이크를 고른 뒤 박수를 쳐보세요.\n"
                  "아래 막대가 크게 튀는 마이크가 정답입니다.",
             style="Muted.TLabel", justify="left",
-        ).pack(anchor="w", pady=(6, 12))
+        ).pack(anchor="w", pady=(theme.px(6), theme.px(10)))
 
         # ── 장치 목록 (30개가 넘으므로 스크롤 필요) ──
-        panel = NeoPanel(self, width=PANEL_WIDTH, height=180, padding=10)
+        panel = NeoPanel(self, width=PANEL_WIDTH, height=170, padding=10)
         panel.pack(anchor="w")
 
         scrollbar = ttk.Scrollbar(panel.body, orient="vertical")
@@ -75,30 +75,30 @@ class DevicePage(ttk.Frame):
         self.listbox.bind("<<ListboxSelect>>", self._on_select)
 
         hint_row = ttk.Frame(self)
-        hint_row.pack(anchor="w", fill="x", pady=(4, 0))
+        hint_row.pack(anchor="w", fill="x", pady=(theme.px(4), 0))
         NeoButton(hint_row, text="목록 새로고침", icon="refresh",
                   command=self.refresh_devices, height=32).pack(side="left")
         ttk.Label(hint_row, text="같은 마이크가 여러 번 보이는 것은 정상입니다\n"
                                  "(드라이버 방식별로 하나씩).",
-                  style="Small.TLabel", justify="left").pack(side="left", padx=(6, 0))
+                  style="Small.TLabel", justify="left").pack(side="left", padx=(theme.px(6), 0))
 
         # ── 실시간 확인 영역 ──
         self.spec_label = ttk.Label(self, text="마이크를 선택하세요", style="Small.TLabel")
-        self.spec_label.pack(anchor="w", pady=(10, 2))
+        self.spec_label.pack(anchor="w", pady=(theme.px(10), theme.px(2)))
 
         meter_row = ttk.Frame(self)
         meter_row.pack(fill="x")
         self.meter = LevelMeter(meter_row)
         self.meter.pack(side="left")
         self.level_label = ttk.Label(meter_row, text="  --.- dBFS", style="Mono.TLabel")
-        self.level_label.pack(side="left", padx=(6, 0))
+        self.level_label.pack(side="left", padx=(theme.px(6), 0))
 
         self.status_label = IconLabel(self, width=PANEL_WIDTH, icon="hourglass", text="",
                                       color=theme.FG_MUTED)
-        self.status_label.pack(anchor="w", pady=(2, 4))
-        self.detail_label = ttk.Label(self, text="", style="Muted.TLabel", wraplength=500,
+        self.status_label.pack(anchor="w", pady=(theme.px(2), theme.px(4)))
+        self.detail_label = ttk.Label(self, text="", style="Muted.TLabel", wraplength=theme.px(500),
                                       justify="left")
-        self.detail_label.pack(anchor="w", pady=(0, 10))
+        self.detail_label.pack(anchor="w", pady=(0, theme.px(8)))
 
         self.confirm_button = NeoButton(self, text="이 마이크 사용하기", icon="check",
                                         command=self._confirm, accent=True)

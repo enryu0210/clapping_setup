@@ -39,7 +39,7 @@ class CalibratePage(ttk.Frame):
     """박수와 잡음을 받아 기준값을 계산하는 화면."""
 
     def __init__(self, parent, monitor: AudioMonitor, settings, on_done) -> None:
-        super().__init__(parent, padding=(24, 20))
+        super().__init__(parent, padding=(theme.px(24), theme.px(18)))
         self.monitor = monitor
         self.settings = settings
         self.on_done = on_done
@@ -57,29 +57,29 @@ class CalibratePage(ttk.Frame):
 
     # ── 화면 구성 ──────────────────────────────────────────
     def _build(self) -> None:
-        header = tk.Canvas(self, width=PANEL_WIDTH, height=38, bg=theme.BG,
+        header = tk.Canvas(self, width=theme.px(PANEL_WIDTH), height=theme.px(40), bg=theme.BG,
                            highlightthickness=0, bd=0)
         header.pack(anchor="w")
-        icons.draw(header, "target", 16, 19, 26, theme.ACCENT, width=2)
-        header.create_text(38, 20, text="박수 보정", anchor="w",
+        icons.draw(header, "target", theme.px(16), theme.px(20), theme.px(26), theme.ACCENT, width=2)
+        header.create_text(theme.px(38), theme.px(21), text="박수 보정", anchor="w",
                            fill=theme.FG, font=theme.FONT_TITLE)
 
         self.instruction = ttk.Label(self, text="", style="Muted.TLabel",
-                                     justify="left", wraplength=PANEL_WIDTH)
-        self.instruction.pack(anchor="w", pady=(6, 12))
+                                     justify="left", wraplength=theme.px(PANEL_WIDTH))
+        self.instruction.pack(anchor="w", pady=(theme.px(6), theme.px(10)))
 
         self.progress_label = IconLabel(self, width=PANEL_WIDTH, icon="clap", text="",
                                         color=theme.FG_MUTED, font=theme.FONT_HEADING,
                                         icon_size=20)
         self.progress_label.pack(anchor="w")
         self.hint_label = ttk.Label(self, text="", style="Small.TLabel",
-                                    wraplength=PANEL_WIDTH)
-        self.hint_label.pack(anchor="w", pady=(2, 10))
+                                    wraplength=theme.px(PANEL_WIDTH))
+        self.hint_label.pack(anchor="w", pady=(theme.px(2), theme.px(8)))
 
         # 모은 샘플의 값을 그대로 보여준다.
         # 사용자가 "기침이 잘못 들어갔네" 같은 걸 알아챌 수 있어야 하기 때문이다.
         self.list_caption = ttk.Label(self, text="모은 박수", style="Small.TLabel")
-        self.list_caption.pack(anchor="w", pady=(0, 4))
+        self.list_caption.pack(anchor="w", pady=(0, theme.px(4)))
 
         panel = NeoPanel(self, width=PANEL_WIDTH, height=130, padding=10)
         panel.pack(anchor="w")
@@ -91,8 +91,8 @@ class CalibratePage(ttk.Frame):
         self.sample_list.pack(fill="both", expand=True)
 
         self.result_label = ttk.Label(self, text="", style="Muted.TLabel",
-                                      wraplength=PANEL_WIDTH, justify="left")
-        self.result_label.pack(anchor="w", pady=(10, 8))
+                                      wraplength=theme.px(PANEL_WIDTH), justify="left")
+        self.result_label.pack(anchor="w", pady=(theme.px(10), theme.px(6)))
 
         row = ttk.Frame(self)
         row.pack(anchor="w")

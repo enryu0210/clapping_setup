@@ -15,13 +15,15 @@ from ..console import force_utf8_console
 from ..session_lock import LockWatcher, is_session_locked
 from ..settings import Settings, load_settings
 from . import theme
+from .apps_page import AppsPage
 from .audio_monitor import AudioMonitor
 from .calibrate_page import CalibratePage
 from .device_page import DevicePage
 from .main_page import MainPage
 
 WINDOW_TITLE = "Clapping Setup"
-WINDOW_SIZE = "620x790"   # 메인 화면에 '무엇이 실행되는지' 줄이 생겨 조금 키웠다
+# 창 크기는 96 DPI 기준. 고해상도 화면에서는 theme.px() 로 함께 커진다.
+WINDOW_WIDTH, WINDOW_HEIGHT = 620, 730
 UI_REFRESH_MS = 50        # 화면 갱신 주기. 20fps면 막대가 충분히 부드럽다.
 LOCK_POLL_MS = 1500       # 화면 잠금 상태를 확인하는 주기.
 # 1.5초면 충분한 이유: 잠금이 풀린 걸 1초 늦게 알아도 사용자는 아직 자리에 앉는 중이다.
@@ -51,9 +53,14 @@ class ClapLauncherApp(tk.Tk):
         self._closed = False   # 정리를 두 번 하지 않기 위한 표시
         self._lock_watcher = LockWatcher()
 
+        # ⚠️ 화면 배율은 **화면을 만들기 전에** 정해야 한다.
+        #    위젯들이 만들어지는 순간의 배율로 크기를 잡기 때문이다.
+        theme.init_scaling(self)
+
         self.title(WINDOW_TITLE)
-        self.geometry(WINDOW_SIZE)
-        self.minsize(600, 750)
+        width, height = theme.px(WINDOW_WIDTH), theme.px(WINDOW_HEIGHT)
+        self.geometry(f"{width}x{height}")
+        self.minsize(width - theme.px(20), height - theme.px(40))
         self.configure(bg=theme.BG)
         self._setup_styles()
 
@@ -119,6 +126,15 @@ class ClapLauncherApp(tk.Tk):
                         borderwidth=0, arrowcolor=theme.FG_MUTED)
         style.map("TScrollbar", background=[("active", theme.DARK)])
 
+        # 입력칸: 뉴모피즘답게 '움푹 들어간 바닥'처럼 보이도록 테두리를 없애고 배경만 낮춘다.
+        # (진짜 그림자를 주려면 캔버스로 만들어야 하는데, 글자 입력 기능을 다시 만들어야 해서
+        #  얻는 것보다 잃는 게 많다. 색만으로 충분히 '입력하는 곳'으로 읽힌다)
+        style.configure("Neo.TEntry", fieldbackground=theme.BG_SUNKEN,
+                        foreground=theme.FG, bordercolor=theme.DARK,
+                        lightcolor=theme.BG_SUNKEN, darkcolor=theme.BG_SUNKEN,
+                        borderwidth=1, relief="flat", padding=theme.px(5))
+        style.map("Neo.TEntry", bordercolor=[("focus", theme.ACCENT)])
+
     # ── 화면 전환 ──────────────────────────────────────────
     def _swap_page(self, page: ttk.Frame) -> None:
         if self.current_page is not None:
@@ -135,7 +151,13 @@ class ClapLauncherApp(tk.Tk):
         # 여기서 monitor.start 를 부르면 그 상태 관리와 어긋난다.
         self._swap_page(MainPage(self.container, self.monitor, self.settings,
                                  on_change_device=self.show_device_page,
-                                 on_calibrate=self.show_calibrate_page))
+                                 on_calibrate=self.show_calibrate_page,
+                                 on_edit_apps=self.show_apps_page))
+
+    def show_apps_page(self) -> None:
+        """실행할 프로그램 목록 편집 화면. 이 화면은 마이크를 쓰지 않는다."""
+        self.monitor.stop()
+        self._swap_page(AppsPage(self.container, on_done=self.show_main_page))
 
     def show_calibrate_page(self) -> None:
         self._swap_page(CalibratePage(self.container, self.monitor, self.settings,

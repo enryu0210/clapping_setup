@@ -67,20 +67,23 @@ class LevelMeter(tk.Canvas):
     """
 
     def __init__(self, parent, width: int = 340, height: int = 26, **kwargs) -> None:
-        from .neumorphic import theme as _t   # 그림자 여백 계산에 필요한 값
+        from .neumorphic import shadow_pad
 
-        self.pad = _t.SHADOW_BLUR * 2 + _t.SHADOW_OFFSET
+        # 크기는 96 DPI 기준으로 받아 여기서 화면 배율을 곱한다 (neumorphic 부품들과 같은 규칙)
+        self.pad = shadow_pad()
+        self.track_width = theme.px(width)
+        self.track_height = theme.px(height)
         super().__init__(
-            parent, width=width + self.pad * 2, height=height + self.pad * 2,
+            parent, width=self.track_width + self.pad * 2,
+            height=self.track_height + self.pad * 2,
             bg=theme.BG, highlightthickness=0, bd=0, **kwargs,
         )
-        self.track_width = width
-        self.track_height = height
 
         # 홈(움푹 들어간 바닥)
-        self._track_image = _make_surface(width, height, height // 2, False,
-                                          theme.BG_SUNKEN, theme.SHADOW_OFFSET - 1,
-                                          theme.SHADOW_BLUR - 2)
+        self._track_image = _make_surface(
+            self.track_width, self.track_height, self.track_height // 2, False,
+            theme.BG_SUNKEN, max(1, theme.px(theme.SHADOW_OFFSET - 1)),
+            max(1, theme.px(theme.SHADOW_BLUR - 2)))
         if self._track_image is not None:
             self.create_image(0, 0, image=self._track_image, anchor="nw")
 
@@ -88,9 +91,9 @@ class LevelMeter(tk.Canvas):
         self._build_segments()
 
     def _build_segments(self) -> None:
-        inner_pad = 6                      # 홈 안쪽 여백 (칸이 홈 벽에 닿지 않게)
+        inner_pad = theme.px(6)            # 홈 안쪽 여백 (칸이 홈 벽에 닿지 않게)
         usable = self.track_width - inner_pad * 2
-        gap = 2
+        gap = max(1, theme.px(2))
         seg_width = (usable - gap * (METER_SEGMENTS - 1)) / METER_SEGMENTS
         top = self.pad + inner_pad * 0.7
         bottom = self.pad + self.track_height - inner_pad * 0.7
