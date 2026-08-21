@@ -1,11 +1,12 @@
 # 설정 파일 작성법 — `config/apps.yaml`
 
-> 최종 수정: 2026-08-09
+> 최종 수정: 2026-08-21
 
 ## 0. 먼저 — 이 파일을 직접 안 고쳐도 됩니다 ⭐
 
 프로그램의 **`[≡ 프로그램 설정]`** 버튼을 누르면 화면에서 목록을 편집할 수 있습니다.
-`추가` → `찾아보기` 로 exe를 고르면 경로가 자동으로 채워지므로 오타가 날 일이 없습니다.
+맨 위의 `2번 · 3번 · 4번 · 5번` 탭이 박수 횟수별 묶음이고, `추가` → `찾아보기` 로
+exe를 고르면 경로가 자동으로 채워지므로 오타가 날 일이 없습니다.
 
 이 문서는 **파일을 직접 편집하고 싶을 때**, 또는 화면에 없는 항목
 (감지 기준값 등)을 손볼 때 보세요.
@@ -23,7 +24,7 @@
 
 | 파일 | 누가 관리하나 | 위치 | 내용 |
 |------|---------------|------|------|
-| `config/apps.yaml` | **내가** 직접 편집 | 저장소 폴더 | 실행할 프로그램, 감지 민감도 |
+| `config/apps.yaml` | **내가** 직접 편집 | 저장소 폴더 | 박수 횟수별 실행 목록(프리셋), 감지 민감도 |
 | `settings.json` | **프로그램**이 저장 | `%LOCALAPPDATA%\ClapDesk\` | UI에서 고른 마이크 |
 
 `settings.json`은 직접 열어볼 일이 거의 없습니다. 마이크를 다시 고르고 싶으면
@@ -37,6 +38,7 @@
 | `detection` | 보정으로 계산된 감지 기준값 | [🎯 박수 보정] |
 | `auto_arm_on_unlock` | 화면 잠금을 풀면 자동으로 듣기 시작 | 메인 화면 체크박스 |
 | `listen_timeout_min` | 이 시간 동안 박수가 없으면 자동으로 멈춤 (0=무제한) | 메인 화면 '듣는 시간' |
+| `launch_confirm_sec` | 감지 후 실행까지 취소할 수 있는 시간 (0=곧바로 실행) | 화면에 없음 — 파일을 직접 편집 |
 
 > 💡 **듣는 시간을 짧게 둘수록 오작동이 줄어듭니다.** 이 프로그램은 평소에 마이크를
 > 아예 열지 않고, 잠금 해제 직후처럼 필요한 순간에만 잠깐 듣습니다.
@@ -83,17 +85,20 @@ python -m clap_launcher --check-config
 박수를 치기 전에 두 명령으로 미리 확인하세요.
 
 ```powershell
-python -m clap_launcher --check-config   # 문법·항목 검사 + 실행 목록 보기 (실행은 안 함)
-python -m clap_launcher --launch-apps    # 박수 없이 지금 바로 실행해 보기
+python -m clap_launcher --check-config          # 문법·항목 검사 + 실행 목록 보기 (실행은 안 함)
+python -m clap_launcher --launch-apps           # 박수 없이 2번 묶음을 지금 실행해 보기
+python -m clap_launcher --launch-apps --claps 3 # 3번 묶음을 실행해 보기
 ```
 
 ```
-✅ 설정 파일을 읽었습니다: F:\dev\clapping_setup\config\apps.yaml
+✅ 설정 파일을 읽었습니다: <저장소>\config\apps.yaml
 
-실행 목록 (3개 켜짐 / 전체 4개):
+박수 2번 → '일' (2개 켜짐 / 전체 2개):
   ○ [exe   ] VS Code — C:/Program Files/Microsoft VS Code/Code.exe  delay=1.0s
-  ○ [url   ] 캘린더 확인 — https://calendar.google.com
   ○ [folder] 작업 폴더 열기 — F:/dev
+
+박수 3번 → '취미' (1개 켜짐 / 전체 2개):
+  ○ [exe   ] Steam — C:/Program Files (x86)/Steam/steam.exe
   × [exe   ] Spotify — C:/.../Spotify.exe        ← × 는 enabled: false 로 꺼둔 항목
 ```
 
@@ -110,8 +115,13 @@ python -m clap_launcher --launch-apps    # 박수 없이 지금 바로 실행해
 ```yaml
 audio:       # 어떤 마이크를 쓸지
 detection:   # 박수를 얼마나 예민하게 감지할지
-apps:        # 박수 치면 무엇을 실행할지
+presets:     # 박수를 몇 번 치면 무엇을 실행할지
 ```
+
+> ⚠️ **예전 형식(`apps:`)도 그대로 읽힙니다.** 프리셋이 생기기 전에 쓰던 파일에는
+> 맨 바깥에 `apps:` 목록만 있는데, 그건 **박수 2번** 묶음으로 자동 배정됩니다.
+> 다만 `presets:` 와 `apps:` 를 **둘 다** 적으면 오류로 막습니다 — 한쪽을 조용히
+> 무시하면 "목록을 고쳤는데 왜 안 바뀌지?"로 한참을 헤매게 되기 때문입니다.
 
 ---
 
@@ -160,18 +170,46 @@ audio:
 
 ---
 
-## 2. `apps` — 실행할 프로그램 목록
+## 2. `presets` — 박수 횟수별 실행 목록
 
-항목 하나에 프로그램 하나입니다. **위에서 아래 순서대로** 실행됩니다.
+**박수를 몇 번 치느냐에 따라 다른 묶음이 켜집니다.** 2번은 일, 3번은 취미, 4번은 휴식처럼요.
 
 ```yaml
-apps:
-  - name: VS Code                 # 로그에 표시될 이름 (아무거나)
-    type: exe                     # 종류 (아래 표 참고)
-    path: "C:/Program Files/Microsoft VS Code/Code.exe"
-    args: ["F:/dev/clapping_setup"]   # 실행 인자 (선택)
-    delay: 0.5                    # 실행 후 다음 항목까지 대기 초 (선택)
+presets:
+  - claps: 2                      # 박수 2번 = 짝짝
+    name: 일                      # 화면에 보여줄 이름 (생략하면 기본 이름)
+    apps:
+      - name: VS Code             # 로그에 표시될 이름 (아무거나)
+        type: exe                 # 종류 (아래 표 참고)
+        path: "C:/Program Files/Microsoft VS Code/Code.exe"
+        args: ["F:/dev/clapping_setup"]   # 실행 인자 (선택)
+        delay: 0.5                # 실행 후 다음 항목까지 대기 초 (선택)
+
+  - claps: 3
+    name: 취미
+    apps:
+      - name: Steam
+        type: exe
+        path: "C:/Program Files (x86)/Steam/steam.exe"
 ```
+
+| 항목 | 설명 |
+|------|------|
+| `claps` | **2~5 만** 쓸 수 있습니다. 한 횟수에 묶음은 하나뿐입니다(중복이면 오류) |
+| `name` | 화면과 로그에 쓸 이름. 생략하면 2·3·4·5 순서로 일·취미·휴식·기타가 기본값 |
+| `apps` | 그 묶음에서 실행할 것들. **위에서 아래 순서대로** 실행됩니다 |
+
+안 쓰는 횟수는 **아예 적지 않으면 됩니다.** 그 횟수로 박수를 치면 아무 일도 일어나지
+않고, 화면에 "그 횟수에 등록된 프로그램이 없습니다"라고 알려줍니다.
+
+> ⚠️ **왜 5번까지만인가**: 6번 이상은 사람이 정확히 세기도, 감지기가 정확히 세기도
+> 어렵습니다. 한 번만 놓쳐도 엉뚱한 묶음이 통째로 켜지므로 "더 늘릴 수 있다"가
+> 곧 좋은 것은 아닙니다.
+
+> 💡 **횟수를 잘못 세면?** 감지한 뒤 곧바로 실행하지 않고 **3초간 취소할 틈**을 줍니다.
+> 화면 아래에 "박수 3번 → '취미' 2개를 3초 뒤 실행합니다"와 함께 [실행 취소] 버튼이
+> 나타납니다. 이 시간을 바꾸려면 `settings.json` 의 `launch_confirm_sec` 을 고치세요
+> (`0` 으로 두면 예전처럼 곧바로 실행합니다).
 
 ### `type` 종류
 
@@ -247,10 +285,21 @@ detection:
   max_harmonicity: 0.55         # 음정 상한
   max_decay_ms: 60.0            # 소리 길이 상한 (종이·음악 배제)
   min_decay_ms: 14.0            # 소리 길이 하한 (키보드·클릭 배제)
-  min_interval_ms: 150
-  max_interval_ms: 800
-  cooldown_sec: 5.0
+  min_interval_ms: 150          # 박수 사이 최소 간격 (잔향을 한 번 더 세지 않기 위함)
+  max_interval_ms: 800          # 박수 사이 최대 간격 — 아래 설명 참고
+  cooldown_sec: 5.0             # 발동 후 재감지 금지 시간
 ```
+
+> ⚠️ **`max_interval_ms` 는 두 가지 역할을 겹쳐서 합니다.** 프리셋이 생기면서
+> 이 값이 실제 체감에 가장 크게 영향을 주는 항목이 됐습니다.
+>
+> 1. **묶음을 가르는 기준** — 이보다 느리게 치면 다음 박수는 별개의 묶음으로 봅니다
+> 2. **발동까지의 지연** — 마지막 박수 후 이만큼 조용해야 "다 쳤다"고 판단합니다
+>
+> 3번을 치려면 두 번째 박수에서 곧바로 발동할 수 없기 때문입니다. 그래서 기본값
+> 800ms 이면 **마지막 박수 후 약 0.9초 뒤에** 실행이 시작됩니다.
+> 값을 줄이면 반응이 빨라지지만, 천천히 치는 사람의 박수가 중간에 끊겨
+> 4번이 2번+2번으로 갈라집니다.
 
 > 🛡️ **오타는 조용히 무시하지 않고 오류로 알려줍니다.** 예를 들어 `max_harmonicty`(i 빠짐)라고
 > 적으면 "모르는 항목입니다"라며 쓸 수 있는 항목 목록을 보여줍니다.
@@ -289,31 +338,52 @@ detection:
 
 ```yaml
 detection:
-  sensitivity: 6.0
   max_interval_ms: 800
 
-apps:
-  # 1. 작업 폴더를 연 상태로 IDE 실행
-  - name: VS Code
-    type: exe
-    path: "C:/Program Files/Microsoft VS Code/Code.exe"
-    args: ["F:/dev/clapping_setup"]
-    delay: 1.0        # 무거우니 다음 앱까지 1초 대기
+presets:
+  # ── 짝짝 (2번) — 일할 때 ──
+  - claps: 2
+    name: 일
+    apps:
+      # 1. 작업 폴더를 연 상태로 IDE 실행
+      - name: VS Code
+        type: exe
+        path: "C:/Program Files/Microsoft VS Code/Code.exe"
+        args: ["F:/dev/clapping_setup"]
+        delay: 1.0        # 무거우니 다음 앱까지 1초 대기
 
-  # 2. 업무용 탭 2개를 한 창에
-  - name: 업무 브라우저
-    type: exe
-    path: "C:/Program Files/Google/Chrome/Application/chrome.exe"
-    args: ["https://github.com", "https://mail.google.com"]
+      # 2. 업무용 탭 2개를 한 창에
+      - name: 업무 브라우저
+        type: exe
+        path: "C:/Program Files/Google/Chrome/Application/chrome.exe"
+        args: ["https://github.com", "https://mail.google.com"]
 
-  # 3. 메신저
-  - name: Slack
-    type: exe
-    path: "C:/Users/User/AppData/Local/slack/slack.exe"
+      # 3. 메신저
+      - name: Slack
+        type: exe
+        path: "C:/Users/User/AppData/Local/slack/slack.exe"
 
-  # 4. 오늘은 음악 없이 — 지우지 않고 꺼두기
-  - name: Spotify
-    type: exe
-    path: "C:/Users/User/AppData/Roaming/Spotify/Spotify.exe"
-    enabled: false
+  # ── 3번 — 퇴근하고 놀 때 ──
+  - claps: 3
+    name: 취미
+    apps:
+      - name: Steam
+        type: exe
+        path: "C:/Program Files (x86)/Steam/steam.exe"
+
+      # 오늘은 음악 없이 — 지우지 않고 꺼두기
+      - name: Spotify
+        type: exe
+        path: "C:/Users/User/AppData/Roaming/Spotify/Spotify.exe"
+        enabled: false
+
+  # ── 4번 — 잠깐 쉴 때 ──
+  - claps: 4
+    name: 휴식
+    apps:
+      - name: 유튜브
+        type: url
+        path: "https://youtube.com"
+
+  # 5번은 안 씁니다. 아예 적지 않으면 그 횟수로 쳐도 아무 일도 없습니다.
 ```

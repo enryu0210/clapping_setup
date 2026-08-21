@@ -40,37 +40,66 @@ detection:
   max_decay_ms: 60.0          # 소리 길이 상한   (종이 110ms) — 종이·음악 배제
   min_decay_ms: 14.0          # 소리 길이 하한   (키보드 10ms) — 키보드·클릭 배제
 
-  # 3단계: "짝-짝인가" 판단
-  min_interval_ms: 150        # 두 박수 사이 최소 간격 (ms) — 잔향을 두 번으로 세는 것 방지
-  max_interval_ms: 800        # 두 박수 사이 최대 간격 (ms) — 이보다 느리면 무시
+  # 3단계: "몇 번 쳤는가" 판단
+  min_interval_ms: 150        # 박수 사이 최소 간격 (ms) — 잔향을 두 번으로 세는 것 방지
+  max_interval_ms: 800        # 박수 사이 최대 간격 (ms). **두 가지 역할을 한다.**
+                              #   · 이보다 느리게 치면 다음 박수는 다른 묶음으로 본다
+                              #   · 마지막 박수 후 이만큼 조용하면 "다 쳤다"고 보고 발동한다
+                              # 즉 이 값이 곧 '발동까지의 지연'이다. 줄이면 빨라지지만
+                              # 천천히 치는 사람의 박수가 중간에 끊긴다.
   cooldown_sec: 5.0           # 발동 후 재감지 금지 시간 (초)
 
-# ---------------- 박수 치면 실행할 것들 ----------------
-# 위에서 아래 순서대로 실행됩니다.
-# type: exe(프로그램) / url(웹주소) / folder(탐색기) / store(스토어 앱)
-# 경로의 역슬래시(\)는 문제가 생길 수 있으니 슬래시(/)를 권장합니다.
-apps:
-  - name: VS Code
-    type: exe
-    path: "C:/Program Files/Microsoft VS Code/Code.exe"
-    args: []              # 예: ["F:/dev/my-project"] 처럼 열 폴더 지정 가능
-    delay: 1.0            # 무거운 프로그램이라 다음 항목까지 1초 대기
+# ---------------- 박수 횟수별로 실행할 것들 ----------------
+# 박수를 몇 번 치느냐에 따라 다른 묶음(프리셋)이 켜집니다.
+#   claps: 2 → 짝짝        claps: 4 → 네 번
+#   claps: 3 → 세 번        claps: 5 → 다섯 번
+#
+# · claps 는 2~5 만 쓸 수 있고, 한 횟수에 묶음은 하나뿐입니다.
+# · 안 쓰는 횟수는 아예 적지 않으면 됩니다 (그 횟수로 치면 아무 일도 안 일어납니다).
+# · 한 묶음 안에서는 위에서 아래 순서대로 실행됩니다.
+# · type: exe(프로그램) / url(웹주소) / folder(탐색기) / store(스토어 앱)
+# · 경로의 역슬래시(\)는 문제가 생길 수 있으니 슬래시(/)를 권장합니다.
+presets:
+  - claps: 2
+    name: 일
+    apps:
+      - name: VS Code
+        type: exe
+        path: "C:/Program Files/Microsoft VS Code/Code.exe"
+        args: []              # 예: ["F:/dev/my-project"] 처럼 열 폴더 지정 가능
+        delay: 1.0            # 무거운 프로그램이라 다음 항목까지 1초 대기
 
-  - name: 업무 브라우저
-    type: exe
-    path: "C:/Program Files/Google/Chrome/Application/chrome.exe"
-    args: ["https://github.com"]
+      - name: 업무 브라우저
+        type: exe
+        path: "C:/Program Files/Google/Chrome/Application/chrome.exe"
+        args: ["https://github.com"]
 
-  - name: 작업 폴더 열기
-    type: folder
-    path: "F:/dev"
+      - name: 작업 폴더 열기
+        type: folder
+        path: "F:/dev"
 
-  - name: 캘린더 확인
-    type: url
-    path: "https://calendar.google.com"
+  - claps: 3
+    name: 취미
+    apps:
+      - name: Steam
+        type: exe
+        path: "C:/Program Files (x86)/Steam/steam.exe"
 
-  # enabled: false 로 두면 지우지 않고 잠시 꺼둘 수 있습니다.
-  - name: Spotify
-    type: exe
-    path: "C:/Users/사용자이름/AppData/Roaming/Spotify/Spotify.exe"
-    enabled: false
+      # enabled: false 로 두면 지우지 않고 잠시 꺼둘 수 있습니다.
+      - name: Spotify
+        type: exe
+        path: "C:/Users/사용자이름/AppData/Roaming/Spotify/Spotify.exe"
+        enabled: false
+
+  - claps: 4
+    name: 휴식
+    apps:
+      - name: 캘린더 확인
+        type: url
+        path: "https://calendar.google.com"
+
+      - name: 유튜브
+        type: url
+        path: "https://youtube.com"
+
+  # 5번은 비워뒀습니다. 이렇게 아예 적지 않으면 그 횟수로 쳐도 아무 일도 없습니다.

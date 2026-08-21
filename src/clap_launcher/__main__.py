@@ -7,6 +7,7 @@
   --level        : 콘솔에서 실시간 음량 확인
   --check-config : 설정 파일(apps.yaml)이 올바른지 검사
   --launch-apps  : 박수 없이 등록된 프로그램을 지금 실행 (설정 확인용)
+                   --claps 3 처럼 어느 묶음을 실행할지 고를 수 있습니다.
 """
 
 import argparse
@@ -19,7 +20,7 @@ from .console import force_utf8_console, restore_console_output
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="clapdesk",
-        description="박수 두 번(짝짝)으로 업무용 프로그램을 한 번에 실행합니다.",
+        description="박수 횟수(2~5번)에 따라 다른 프로그램 묶음을 한 번에 실행합니다.",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument(
@@ -36,7 +37,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--launch-apps", action="store_true",
-        help="[디버깅] 박수 없이 등록된 프로그램을 지금 바로 실행합니다.",
+        help="[디버깅] 박수 없이 등록된 프로그램을 지금 바로 실행합니다. (--claps 로 묶음 선택)",
+    )
+    parser.add_argument(
+        "--claps", type=int, default=2,
+        help="--launch-apps 로 실행할 묶음의 박수 횟수 (2~5, 기본: 2)",
     )
     parser.add_argument(
         "--minimized", action="store_true",
@@ -77,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.check_config:
         return _check_config()
     if args.launch_apps:
-        return _launch_apps_now()
+        return _launch_apps_now(args.claps)
 
     # 무거운 오디오 라이브러리는 실제로 필요할 때만 불러온다.
     # (--version, --help 만 쓰는 경우까지 sounddevice 로딩을 기다릴 이유가 없다)
@@ -126,19 +131,23 @@ def _check_config() -> int:
         return 1
 
     print(f"✅ 설정 파일을 읽었습니다: {find_config_path()}")
-    if not config.apps:
-        print("   ⚠ apps 목록이 비어 있습니다. 박수를 쳐도 실행할 것이 없습니다.")
+    if not config.filled_presets:
+        print("   ⚠ 어느 박수 횟수에도 실행할 프로그램이 없습니다.")
         return 0
 
-    print(f"\n실행 목록 ({len(config.enabled_apps)}개 켜짐 / 전체 {len(config.apps)}개):")
-    for entry in config.apps:
-        mark = "○" if entry.enabled else "×"    # × 는 enabled: false 로 꺼둔 항목
-        extra = f"  delay={entry.delay}s" if entry.delay else ""
-        print(f"  {mark} [{entry.type:6s}] {entry.name} — {entry.path}{extra}")
+    for preset in config.presets:
+        if not preset.apps:
+            continue        # 빈 칸까지 다 찍으면 정작 등록된 것이 묻힌다
+        print(f"\n박수 {preset.claps}번 → '{preset.display_name}' "
+              f"({len(preset.enabled_apps)}개 켜짐 / 전체 {len(preset.apps)}개):")
+        for entry in preset.apps:
+            mark = "○" if entry.enabled else "×"    # × 는 enabled: false 로 꺼둔 항목
+            extra = f"  delay={entry.delay}s" if entry.delay else ""
+            print(f"  {mark} [{entry.type:6s}] {entry.name} — {entry.path}{extra}")
     return 0
 
 
-def _launch_apps_now() -> int:
+def _launch_apps_now(claps: int) -> int:
     """박수 없이 지금 바로 실행해 본다. 경로가 맞는지 확인하는 가장 빠른 방법이다."""
     from .config import ConfigError, load_config
     from .launcher.app_launcher import AppLauncher
@@ -149,12 +158,15 @@ def _launch_apps_now() -> int:
         print(f"\n❌ {exc}", file=sys.stderr)
         return 1
 
-    if not config.enabled_apps:
-        print("실행할 프로그램이 없습니다. config/apps.yaml 의 apps 목록을 확인하세요.")
+    preset = config.preset_for(claps)
+    if preset is None:
+        available = ", ".join(f"{p.claps}번({p.display_name})" for p in config.filled_presets)
+        print(f"박수 {claps}번에 등록된 프로그램이 없습니다."
+              + (f" 등록된 묶음: {available}" if available else ""))
         return 1
 
-    print(f"{len(config.enabled_apps)}개를 실행합니다…")
-    result = AppLauncher().launch_all(config.apps)
+    print(f"박수 {claps}번 → '{preset.display_name}' {len(preset.enabled_apps)}개를 실행합니다…")
+    result = AppLauncher().launch_all(preset.apps)
     print(result.summary())
     # 하나라도 실패하면 종료 코드로 알린다 (스크립트에서 확인하기 좋게)
     return 0 if result.ok else 1

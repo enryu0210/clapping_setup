@@ -19,7 +19,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from .. import autostart
-from ..config import ConfigError, DetectionConfig, find_config_path, load_config
+from ..config import Config, ConfigError, DetectionConfig, find_config_path, load_config
 from ..launcher.app_launcher import AppLauncher
 from ..listening import ListeningSession, StopReason, format_remaining
 from ..settings import save_settings
@@ -55,6 +55,12 @@ class MainPage(ttk.Frame):
         self._shown_events = 0    # 로그에 이미 그린 이벤트의 누적 개수
         self._launcher = AppLauncher()
         self._launching = False   # 실행 중에 또 실행하지 않기 위한 표시
+
+        # ── 실행 직전 대기(취소 배너) 상태 ──
+        self._pending_preset = None    # 실행하기로 예약된 프리셋
+        self._pending_claps = 0        # 그 예약을 만든 박수 횟수 (안내문에 쓴다)
+        self._pending_left = 0         # 남은 초
+        self._pending_after: str | None = None   # after() 예약 번호 (취소하려면 필요)
 
         self._build()
         # 설정 파일 문제는 **박수를 치기 전에** 알려줘야 한다.
@@ -157,20 +163,43 @@ class MainPage(ttk.Frame):
         bottom = ttk.Frame(self)
         bottom.pack(anchor="w")
         NeoButton(bottom, text="박수 보정", icon="target",
-                  command=self.on_calibrate).pack(side="left")
+                  command=lambda: self._leave_to(self.on_calibrate)).pack(side="left")
         NeoButton(bottom, text="마이크 변경", icon="mic",
-                  command=self.on_change_device).pack(side="left")
+                  command=lambda: self._leave_to(self.on_change_device)).pack(side="left")
 
         # 박수를 쳤을 때 무엇이 실행되는지 / 실행 결과가 어땠는지를 보여주는 자리.
         # 마이크 오류(error_label)와 섞으면 한쪽이 다른 쪽을 지워버려서 따로 뒀다.
-        self.launch_label = ttk.Label(self, text="", style="Small.TLabel",
-                                      wraplength=theme.px(520), justify="left")
-        self.launch_label.pack(anchor="w", pady=(theme.px(8), 0))
+        #
+        # ⚠️ 취소 버튼을 안내문 **옆에** 두는 이유: 아래에 한 줄 더 만들면 창 높이를
+        #    넘어가 버튼이 잘린다(실제로 그렇게 만들었다가 확인했다). 옆에 두면
+        #    안내문이 이미 차지한 줄 안에 들어가서 높이가 늘지 않는다.
+        launch_row = ttk.Frame(self)
+        launch_row.pack(anchor="w", fill="x", pady=(theme.px(8), 0))
+        self.launch_label = ttk.Label(launch_row, text="", style="Small.TLabel",
+                                      wraplength=theme.px(455), justify="left")
+        self.launch_label.pack(side="left", anchor="n")
+
+        # 평소에는 pack 하지 않아 자리를 차지하지 않는다.
+        # (버튼을 늘 두고 흐리게만 하면 "지금 취소할 게 있나?" 하고 눈이 계속 간다)
+        self.cancel_launch_button = NeoButton(launch_row, text="실행 취소", icon="close",
+                                              height=32, command=self._cancel_pending_launch)
+
+    def _leave_to(self, go) -> None:
+        """다른 화면으로 넘어간다. 떠나기 전에 예약된 실행을 반드시 끊는다.
+
+        안 끊으면 보정 화면에 있는 동안 프로그램들이 뒤에서 켜진다. 사용자는
+        무엇 때문에 창이 우르르 뜨는지 알 수 없다.
+        """
+        self._clear_pending()
+        go()
 
     def _open_apps_page(self) -> None:
         """프로그램 목록 편집 화면으로 넘어간다. 마이크는 잡고 있을 이유가 없으니 놓는다."""
         if self.on_edit_apps is None:
             return
+        # 설정을 고치러 가면서 예약된 실행을 남겨두면, 설정 화면에 있는 동안
+        # 프로그램들이 뒤에서 켜진다. 화면을 떠나기 전에 반드시 끊는다.
+        self._clear_pending()
         if self.session.armed:
             self.stop_listening(StopReason.MANUAL)
         self.on_edit_apps()
@@ -223,6 +252,11 @@ class MainPage(ttk.Frame):
         self._refresh_status()
 
     def _toggle_listening(self) -> None:
+        # 실행을 기다리는 중에 [듣기 시작]을 누르는 것은 "그거 말고 다시 치겠다"는 뜻이다.
+        # 예약을 남겨두면 다시 듣는 도중에 예약분이 실행돼 버린다.
+        if self._pending_preset is not None:
+            self._cancel_pending_launch()
+            return
         if self.session.armed:
             self.stop_listening(StopReason.MANUAL)
         else:
@@ -270,18 +304,18 @@ class MainPage(ttk.Frame):
         #    마이크를 잡고 있게 되고, 그동안 들어온 소리로 또 발동할 여지가 생긴다.
         if snapshot.trigger_count > 0:
             self.stop_listening(StopReason.TRIGGERED)
-            self.launch_apps()
+            self._handle_trigger(snapshot.last_trigger_claps)
             return
 
         self._refresh_status()
 
     # ── 프로그램 실행 ──────────────────────────────────────
-    def _load_apps(self):
-        """설정 파일에서 실행 목록을 읽는다.
+    def _load_config(self) -> tuple[Config | None, str]:
+        """설정 파일을 읽는다.
 
         Returns:
-            (실행할 항목들, 오류 안내문). 오류가 없으면 안내문은 빈 문자열이고,
-            **진짜 오류일 때만** 항목이 None 이 된다.
+            (설정, 오류 안내문). 오류가 없으면 안내문은 빈 문자열이고,
+            **진짜 오류일 때만** 설정이 None 이 된다.
 
         ⚠️ 설정 파일이 아직 없는 것은 오류가 아니다. 갓 설치한 사람의 정상적인 상태다.
            이걸 오류로 다루면 첫 실행 화면에 빨간 경고가 계속 떠 있게 된다
@@ -291,44 +325,145 @@ class MainPage(ttk.Frame):
         설정을 손보는 과정이 너무 번거롭다. 파일 읽기는 순식간이라 부담도 없다.
         """
         if find_config_path() is None:
-            return [], ""          # 아직 등록한 적이 없다 — 정상적인 첫 실행 상태
+            # 아직 등록한 적이 없다 — 빈 설정을 돌려주면 그 뒤 흐름이 전부 똑같이 흘러간다
+            return Config(detection=DetectionConfig()), ""
         try:
-            return load_config().enabled_apps, ""
+            return load_config(), ""
         except ConfigError as exc:
             return None, str(exc)
 
     def _show_launch_targets(self) -> None:
-        """지금 설정대로면 무엇이 실행되는지 미리 보여준다."""
-        apps, error = self._load_apps()
-        if apps is None:
+        """지금 설정대로면 박수 몇 번에 무엇이 실행되는지 미리 보여준다.
+
+        프리셋이 생기면서 이 안내가 더 중요해졌다. "2번은 일, 3번은 취미"를 기억하지
+        못하면 사용자는 매번 설정 화면을 열어봐야 한다.
+        """
+        config, error = self._load_config()
+        if config is None:
             # 설정 파일이 있는데 잘못된 경우 — 이건 진짜 알려야 할 문제다
             self.launch_label.config(text=f"⚠ {error}", foreground=theme.ERROR)
-        elif not apps:
+            return
+
+        filled = config.filled_presets
+        if not filled:
             # 겁주지 않고 다음에 할 일을 알려준다
             self.launch_label.config(
                 text="아직 등록된 프로그램이 없습니다 — [프로그램 설정]에서 추가하세요.",
                 foreground=theme.FG_MUTED)
-        else:
-            names = ", ".join(app.name for app in apps)
-            self.launch_label.config(text=f"박수 치면 실행: {names}", foreground=theme.FG_MUTED)
+            return
 
-    def launch_apps(self) -> None:
-        """등록된 프로그램들을 실행한다 (박수 감지 성공 시 호출)."""
+        # ⚠️ 짧게 유지해야 한다. 프리셋 넷에 항목을 잔뜩 넣은 사람의 화면에서 이 안내가
+        #    네 줄로 불어나면 창 아래로 밀려 잘린다. 이름은 앞 두 개까지만 보여준다.
+        parts = [f"{preset.claps}번 {preset.display_name}: {_join_names(preset.enabled_apps)}"
+                 for preset in filled]
+        self.launch_label.config(text="  ·  ".join(parts), foreground=theme.FG_MUTED)
+
+    # ── 박수를 감지한 뒤: 프리셋 찾기 → 취소 배너 → 실행 ──
+    def _handle_trigger(self, claps: int) -> None:
+        """박수 묶음이 확정됐을 때. 그 횟수에 해당하는 프리셋을 찾아 실행을 예약한다."""
+        config, error = self._load_config()
+        if config is None:
+            self.launch_label.config(text=f"⚠ {error}", foreground=theme.ERROR)
+            return
+
+        preset = config.preset_for(claps)
+        if preset is None:
+            # **아무 일도 안 일어난 이유를 반드시 말해준다.** 조용히 끝나면
+            # 사용자는 감지가 안 된 줄 알고 계속 더 크게 박수를 친다.
+            self.launch_label.config(
+                text=f"박수 {claps}번을 감지했지만, {claps}번에 등록된 프로그램이 없습니다 "
+                     "— [프로그램 설정]에서 채워주세요.",
+                foreground=theme.WARN)
+            return
+
+        wait_sec = int(round(max(0.0, self.settings.launch_confirm_sec)))
+        if wait_sec <= 0:
+            self.launch_apps(preset)
+            return
+        self._start_pending_launch(preset, claps, wait_sec)
+
+    def _start_pending_launch(self, preset, claps: int, seconds: int) -> None:
+        """실행 직전 취소 배너를 띄운다.
+
+        ⚠️ 이 대기가 있는 이유 (프리셋의 대가):
+           박수를 4번 쳤는데 감지기가 하나를 놓치면 3번 프리셋이 켜진다. 예전처럼
+           '짝짝' 하나뿐일 때는 오탐이 나도 켜지는 게 늘 같은 묶음이었지만, 지금은
+           **의도하지 않은 다른 묶음**이 통째로 뜬다. 되돌릴 틈을 주는 편이 낫다.
+        """
+        self._cancel_pending_launch(announce=False)   # 겹쳐서 예약되는 일이 없게
+        self._pending_preset = preset
+        self._pending_claps = claps
+        self._pending_left = seconds
+        self.cancel_launch_button.pack(side="left", anchor="n")
+        self._pending_tick()
+
+    def _pending_tick(self) -> None:
+        """1초마다 남은 시간을 갱신하고, 0이 되면 실행한다."""
+        preset = self._pending_preset
+        if preset is None:
+            return
+
+        if self._pending_left <= 0:
+            self._clear_pending()
+            self.launch_apps(preset)
+            return
+
+        self.launch_label.config(
+            text=f"박수 {self._pending_claps}번 → '{preset.display_name}' "
+                 f"{len(preset.enabled_apps)}개를 {self._pending_left}초 뒤 실행합니다. "
+                 "잘못 세었다면 [실행 취소]를 누르세요.",
+            foreground=theme.ACCENT)
+        self._pending_left -= 1
+        try:
+            self._pending_after = self.after(1000, self._pending_tick)
+        except tk.TclError:
+            self._clear_pending()   # 창이 닫히는 중 — 예약할 곳이 없다
+
+    def _cancel_pending_launch(self, announce: bool = True) -> None:
+        """예약된 실행을 취소한다. 버튼에서도, 화면을 떠날 때도 불린다."""
+        if self._pending_preset is None:
+            return
+        claps = self._pending_claps
+        self._clear_pending()
+        if not announce:
+            return
+        self.launch_label.config(text=f"박수 {claps}번 실행을 취소했습니다. 다시 듣습니다.",
+                                 foreground=theme.FG_MUTED)
+        # 취소했다는 것은 '다시 치겠다'는 뜻이다. 여기서 대기 상태로 두면
+        # 사용자는 [듣기 시작]을 한 번 더 눌러야 한다.
+        self.start_listening()
+
+    def _clear_pending(self) -> None:
+        """예약 상태만 정리한다 (안내문은 건드리지 않는다)."""
+        if self._pending_after is not None:
+            try:
+                self.after_cancel(self._pending_after)
+            except (tk.TclError, ValueError):
+                pass       # 이미 실행됐거나 창이 닫혔다 — 어느 쪽이든 할 일이 없다
+        self._pending_after = None
+        self._pending_preset = None
+        self._pending_claps = 0
+        self._pending_left = 0
+        try:
+            self.cancel_launch_button.pack_forget()
+        except tk.TclError:
+            pass
+
+    def launch_apps(self, preset) -> None:
+        """프리셋 하나에 등록된 프로그램들을 실행한다."""
         if self._launching:
             return                      # 이미 실행 중이면 무시 (중복 실행 방지)
 
-        apps, error = self._load_apps()
-        if apps is None:
-            self.launch_label.config(text=f"⚠ {error}", foreground=theme.ERROR)
-            return
+        apps = preset.enabled_apps
         if not apps:
             self.launch_label.config(
-                text="박수는 감지했지만 실행할 프로그램이 없습니다 — [프로그램 설정]에서 추가하세요.",
+                text=f"'{preset.display_name}' 에 켜져 있는 항목이 없습니다.",
                 foreground=theme.WARN)
             return
 
         self._launching = True
-        self.launch_label.config(text=f"{len(apps)}개 실행 중…", foreground=theme.FG_MUTED)
+        self.launch_label.config(text=f"'{preset.display_name}' {len(apps)}개 실행 중…",
+                                 foreground=theme.FG_MUTED)
 
         # ⚠️ 별도 스레드에서 도는 이유: delay 옵션 때문에 항목 사이에 몇 초씩 쉬어간다.
         #    화면 스레드에서 그대로 기다리면 그동안 창이 얼어붙어 고장 난 것처럼 보인다.
@@ -353,13 +488,26 @@ class MainPage(ttk.Frame):
         self.launch_label.config(text=result.summary(), foreground=color)
 
     def _refresh_status(self) -> None:
+        # 실행을 기다리는 중에는 그 사실이 다른 무엇보다 먼저 읽혀야 한다.
+        # '대기 중'이라고만 써 두면 곧 프로그램이 켜진다는 걸 알 수 없다.
+        if self._pending_preset is not None:
+            self.status_label.set(f"'{self._pending_preset.display_name}' 실행 대기 중",
+                                  "clock", theme.ACCENT)
+            # ⚠️ 버튼 너비는 만들 때 '듣기 중지'에 맞춰 정해진다. 더 긴 글자를 넣으면
+            #    양옆이 잘린다. 여기 글자는 5자를 넘기지 말 것.
+            self.toggle_button.set_text("다시 듣기", "play")
+            self.reason_label.config(
+                text=f"박수 {self._pending_claps}번으로 인식했습니다.",
+                foreground=theme.ACCENT)
+            return
+
         if self.session.armed:
             remaining = format_remaining(self.session.remaining(time.monotonic()))
             suffix = f"  ·  {remaining} 남음" if remaining else "  ·  무제한"
             self.status_label.set(f"듣는 중{suffix}", "headphones", theme.OK)
             self.toggle_button.set_text("듣기 중지", "stop")
             if self.session.stop_reason is not StopReason.TRIGGERED:
-                self.reason_label.config(text="박수 두 번(짝짝)을 기다리는 중…",
+                self.reason_label.config(text="박수를 기다리는 중… (2~5번, 친 횟수에 따라 다른 묶음)",
                                          foreground=theme.FG_MUTED)
         else:
             self.status_label.set("대기 중 · 마이크를 사용하지 않습니다",
@@ -383,9 +531,15 @@ class MainPage(ttk.Frame):
 
         for event in new_events:
             if event.triggered:
-                text = "짝짝! 발동"
+                text = f"👏 박수 {event.clap_count}번 완성!"
+            elif event.reject_reason:
+                # 박수로 인정됐지만 세지 않은 것들('쿨다운 중', '간격이 너무 짧음')도
+                # 여기로 온다. 왜 안 세었는지가 왜 안 잡혔는지만큼 중요하다.
+                text = f"·  {event.reject_reason}"
             elif event.is_clap:
-                text = f"박수 1회  {event.features.describe()}"
+                # 몇 번째를 세고 있는지 보여준다. 감지기가 하나를 놓쳤을 때
+                # "내가 3번 쳤는데 화면엔 2번째까지만 있네"로 바로 알 수 있다.
+                text = f"박수 {event.clap_count}번째  {event.features.describe()}"
             else:
                 text = f"·  {event.reject_reason}"
             self.log.insert(tk.END, f"  {text}")
@@ -395,6 +549,14 @@ class MainPage(ttk.Frame):
         # 목록이 무한정 길어지지 않게 오래된 줄을 지운다
         while self.log.size() > 200:
             self.log.delete(0)
+
+
+def _join_names(apps, limit: int = 2) -> str:
+    """'VS Code, Slack 외 2개' 형태로. 프리셋이 넷이라 전부 나열하면 화면을 다 잡아먹는다."""
+    names = [app.name for app in apps]
+    if len(names) <= limit:
+        return ", ".join(names)
+    return f"{', '.join(names[:limit])} 외 {len(names) - limit}개"
 
 
 class NeoToggleRow(ttk.Frame):

@@ -24,6 +24,12 @@ EXAMPLE_FILE_NAME = "apps.example.yaml"
 
 VALID_APP_TYPES = ("exe", "url", "folder", "store")
 
+# 지원하는 박수 횟수. 여기를 늘리면 화면 탭도 저절로 늘어난다.
+# 상한을 5로 둔 이유: 6번 이상은 사람이 정확히 세기도, 감지기가 정확히 세기도 어렵다.
+# 한 번만 놓쳐도 엉뚱한 프리셋이 켜지므로 '더 늘릴 수 있다'가 곧 좋은 것은 아니다.
+CLAP_COUNTS = (2, 3, 4, 5)
+DEFAULT_PRESET_NAMES = {2: "일", 3: "취미", 4: "휴식", 5: "기타"}
+
 # detection 항목 중 정수여야 하는 것들 (나머지는 실수)
 _INT_DETECTION_FIELDS = frozenset({"min_interval_ms", "max_interval_ms"})
 
@@ -124,15 +130,93 @@ class AppEntry:
 
 
 @dataclass
-class Config:
-    detection: DetectionConfig
-    apps: list[AppEntry]
-    audio: AudioConfig = field(default_factory=AudioConfig)
+class Preset:
+    """박수 횟수 하나에 묶인 프로그램 묶음.
+
+    프리셋의 정체성은 **박수 횟수 그 자체**다. 이름표를 따로 두지 않고 횟수를 열쇠로 삼은
+    이유: '이름은 있는데 횟수가 없는 프리셋', '같은 횟수를 쓰는 프리셋 둘' 같은 상태가
+    아예 생길 수 없다. 사용자가 고민할 것은 "몇 번 칠까"가 아니라 "여기에 뭘 넣을까"뿐이다.
+    """
+
+    claps: int                              # 2~5. 이 횟수만큼 박수를 치면 이 묶음이 실행된다
+    name: str = ""                          # 사람이 붙인 이름. 비어 있으면 기본 이름을 쓴다
+    apps: list[AppEntry] = field(default_factory=list)
 
     @property
     def enabled_apps(self) -> list[AppEntry]:
         """실제로 실행될 항목만. enabled: false 는 여기서 빠진다."""
         return [app for app in self.apps if app.enabled]
+
+    @property
+    def is_empty(self) -> bool:
+        """이 횟수로 박수를 쳐도 켤 것이 없는가.
+
+        ⚠️ apps 가 비었는지가 아니라 **켜진 항목이 있는지**로 판단한다.
+           전부 꺼둔 프리셋은 등록만 되어 있을 뿐 실행할 것이 없다.
+        """
+        return not self.enabled_apps
+
+    @property
+    def display_name(self) -> str:
+        """화면과 로그에 쓸 이름. 비워둔 사람에게도 부를 이름은 있어야 한다."""
+        return self.name.strip() or DEFAULT_PRESET_NAMES.get(self.claps, f"{self.claps}번")
+
+    @property
+    def label(self) -> str:
+        """'3번 · 취미' 형태. 횟수와 이름은 늘 붙어 다녀야 헷갈리지 않는다."""
+        return f"{self.claps}번 · {self.display_name}"
+
+
+def default_presets() -> list[Preset]:
+    """빈 프리셋 4칸(2~5회). 아직 아무것도 등록하지 않은 상태."""
+    return [Preset(claps=count) for count in CLAP_COUNTS]
+
+
+def normalize_presets(presets: list[Preset]) -> list[Preset]:
+    """항상 2~5회 네 칸이, 그 순서대로 있게 맞춘다.
+
+    화면도 저장도 '네 칸이 반드시 있다'를 전제로 짜여 있다. 파일에 3회만 적혀 있는
+    경우까지 화면 쪽에서 매번 신경 쓰게 하면 빈칸 처리 실수가 여기저기 흩어진다.
+    들어올 때 한 번 채워두고 그 뒤로는 아무도 걱정하지 않게 한다.
+    """
+    by_count = {preset.claps: preset for preset in presets if preset.claps in CLAP_COUNTS}
+    return [by_count.get(count) or Preset(claps=count) for count in CLAP_COUNTS]
+
+
+@dataclass
+class Config:
+    detection: DetectionConfig
+    presets: list[Preset] = field(default_factory=default_presets)
+    audio: AudioConfig = field(default_factory=AudioConfig)
+
+    def __post_init__(self) -> None:
+        # 어떤 경로로 만들어졌든(파일 읽기·화면 편집·테스트) 네 칸을 보장한다
+        self.presets = normalize_presets(self.presets)
+
+    def preset_at(self, claps: int) -> Preset:
+        """그 횟수의 프리셋 칸. 비어 있어도 **반드시 하나를 돌려준다** (편집할 때 쓴다).
+
+        아래 preset_for 와 헷갈리지 말 것. 묻는 것이 다르다.
+          preset_at  : "3번 칸을 보여줘"        → 비어 있어도 칸은 있다
+          preset_for : "3번을 치면 뭘 켜야 해?" → 켤 게 없으면 None
+        """
+        return next(preset for preset in self.presets if preset.claps == claps)
+
+    def preset_for(self, claps: int) -> Preset | None:
+        """그 횟수에 실제로 실행할 것이 등록된 프리셋. 없으면 None.
+
+        '등록은 했지만 전부 꺼둔' 프리셋도 None 으로 본다. 사용자 입장에서 둘 다
+        "박수를 쳤는데 아무 일도 없다"이고, 그 사정은 화면에서 따로 설명해 준다.
+        """
+        for preset in self.presets:
+            if preset.claps == claps and not preset.is_empty:
+                return preset
+        return None
+
+    @property
+    def filled_presets(self) -> list[Preset]:
+        """실행할 것이 하나라도 들어 있는 프리셋들. 화면에 '무엇이 준비됐는지' 요약할 때 쓴다."""
+        return [preset for preset in self.presets if not preset.is_empty]
 
 
 class ConfigError(Exception):
@@ -247,7 +331,7 @@ def load_config(path: str | Path | None = None) -> Config:
 
     return Config(
         detection=_parse_detection(raw.get("detection")),
-        apps=_parse_apps(raw.get("apps")),
+        presets=_parse_presets(raw.get("presets"), raw.get("apps")),
         audio=_parse_audio(raw.get("audio")),
     )
 
@@ -334,6 +418,78 @@ def _check_min_max(config: DetectionConfig) -> None:
                 f"detection.{low_key}({low}) 가 {high_key}({high}) 보다 크거나 같습니다.\n"
                 "  이렇게 두면 어떤 소리도 통과하지 못해 박수를 쳐도 반응하지 않습니다."
             )
+
+
+def _parse_presets(raw, legacy_apps) -> list[Preset]:
+    """presets: 항목. 없으면 예전 형식(apps:)을 2회 프리셋으로 받아들인다.
+
+    ⚠️ 하위 호환이 필요한 이유: 프리셋이 생기기 전에 쓰던 apps.yaml 에는 apps: 목록만
+       있다. 그 파일을 "presets 가 없다"고 거부하면 업데이트하는 순간 등록해 둔 프로그램이
+       통째로 사라진 것처럼 보인다. 예전 목록은 **박수 2번**에 그대로 배정한다.
+
+    반대로 둘 다 적혀 있으면 오류로 막는다. 한쪽을 조용히 무시하면
+    "목록을 고쳤는데 왜 안 바뀌지?"로 한참을 헤매게 되기 때문이다.
+    """
+    if raw is not None and legacy_apps is not None:
+        raise ConfigError(
+            "설정 파일에 presets: 와 apps: 가 둘 다 있습니다.\n"
+            "  apps: 는 프리셋이 생기기 전의 예전 형식입니다. 그 목록을 원하는 프리셋의\n"
+            "  apps: 아래로 옮기고, 맨 바깥의 apps: 항목은 지워주세요."
+        )
+
+    if raw is None:
+        # 예전 형식 — 등록해 둔 목록을 '박수 2번' 프리셋으로 옮겨 담는다
+        if legacy_apps is None:
+            return default_presets()
+        return normalize_presets([Preset(claps=2, apps=_parse_apps(legacy_apps))])
+
+    if not isinstance(raw, list):
+        raise ConfigError(
+            "presets: 항목은 '- claps: 2' 로 시작하는 목록이어야 합니다.\n"
+            "  각 줄 앞의 '-' 를 빠뜨리지 않았는지 확인해 주세요."
+        )
+
+    presets = [_parse_preset(item, order) for order, item in enumerate(raw, start=1)]
+
+    seen: set[int] = set()
+    for preset in presets:
+        if preset.claps in seen:
+            raise ConfigError(
+                f"박수 {preset.claps}번짜리 프리셋이 두 개 있습니다.\n"
+                "  한 횟수에는 프리셋 하나만 배정할 수 있습니다. 하나로 합쳐주세요."
+            )
+        seen.add(preset.claps)
+    return normalize_presets(presets)
+
+
+def _parse_preset(raw, order: int) -> Preset:
+    """presets 목록의 항목 하나."""
+    where = f"presets 의 {order}번째 항목"
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where}이 잘못됐습니다: 'claps:', 'apps:' 같은 하위 항목이 필요합니다.")
+
+    claps = raw.get("claps")
+    # bool 은 파이썬에서 int 취급이라 먼저 걸러야 한다 (claps: true 를 1로 읽으면 곤란)
+    if isinstance(claps, bool) or not isinstance(claps, int):
+        raise ConfigError(f"{where}에 claps(박수 횟수)가 없거나 숫자가 아닙니다. 지금 값: {claps!r}")
+    if claps not in CLAP_COUNTS:
+        raise ConfigError(
+            f"{where}의 claps 가 {claps} 입니다. "
+            f"쓸 수 있는 값: {', '.join(str(c) for c in CLAP_COUNTS)}"
+        )
+
+    name = raw.get("name")
+    if name is not None and not isinstance(name, str):
+        raise ConfigError(f"박수 {claps}번 프리셋의 name 은 글자여야 합니다. 지금 값: {name!r}")
+
+    for key in raw:
+        if key not in ("claps", "name", "apps"):
+            raise ConfigError(
+                f"박수 {claps}번 프리셋에 모르는 항목이 있습니다: '{key}' (오타일 수 있습니다)\n"
+                "  쓸 수 있는 항목: claps, name, apps"
+            )
+
+    return Preset(claps=claps, name=(name or "").strip(), apps=_parse_apps(raw.get("apps")))
 
 
 def _parse_apps(raw) -> list[AppEntry]:
@@ -475,13 +631,35 @@ def dump_config_text(config: Config) -> str:
                  "# 각 값의 근거는 docs/DETECTION.md 참고.\n")
     parts.append(_yaml_block({"detection": config.detection.to_dict()}))
 
-    # ── apps ──
-    parts.append("\n# 박수 치면 실행할 것들 (위에서 아래 순서대로 실행)\n")
-    if not config.apps:
-        parts.append("apps: []\n")
+    # ── presets ──
+    parts.append("\n# 박수 횟수별로 실행할 것들 (한 프리셋 안에서는 위에서 아래 순서대로 실행)\n"
+                 "#   claps: 2 → '짝짝' 두 번,  claps: 3 → 세 번 …  (2~5번까지)\n")
+    written = [_preset_to_dict(preset) for preset in config.presets
+               if _is_worth_writing(preset)]
+    if not written:
+        parts.append("presets: []\n")
     else:
-        parts.append(_yaml_block({"apps": [_app_to_dict(app) for app in config.apps]}))
+        parts.append(_yaml_block({"presets": written}))
     return "".join(parts)
+
+
+def _is_worth_writing(preset: Preset) -> bool:
+    """파일에 적을 가치가 있는 프리셋인가.
+
+    빈 칸 네 개를 늘 적어두면 파일만 길어지고 읽기 어려워진다. 다만 **이름만 바꿔둔**
+    빈 프리셋은 남긴다. "5번은 게임용으로 쓸 것"이라고 이름을 지어놨는데 저장할 때마다
+    그 이름이 사라지면, 사용자 입장에서는 설정이 지워진 것이다.
+    """
+    return bool(preset.apps) or bool(preset.name.strip())
+
+
+def _preset_to_dict(preset: Preset) -> dict:
+    """프리셋 하나를 사전으로. claps 를 맨 앞에 둬서 파일을 훑을 때 바로 눈에 띄게 한다."""
+    data: dict = {"claps": preset.claps}
+    if preset.name.strip():
+        data["name"] = preset.name.strip()
+    data["apps"] = [_app_to_dict(app) for app in preset.apps]
+    return data
 
 
 def _app_to_dict(app: AppEntry) -> dict:

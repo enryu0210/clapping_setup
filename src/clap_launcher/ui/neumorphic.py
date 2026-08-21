@@ -394,11 +394,14 @@ class NeoSegmented(tk.Frame):
     """
 
     def __init__(self, parent, options: list[tuple[str, float]], value: float,
-                 command=None, **kwargs) -> None:
+                 command=None, width: int | None = None, **kwargs) -> None:
         """
         Args:
             options: (보여줄 글자, 실제 값) 목록
             value: 처음 선택된 값
+            width: 칸 하나의 너비(96 DPI 기준). 생략하면 지금 글자 길이에 맞춘다.
+                   ⚠️ 나중에 set_label 로 글자를 바꿀 예정이라면 반드시 지정해야 한다.
+                      너비는 만들 때 한 번 정해지므로, 더 긴 글자로 바꾸면 잘린다.
         """
         from tkinter import font as tkfont
 
@@ -411,7 +414,7 @@ class NeoSegmented(tk.Frame):
         # 글자 수로 어림잡던 예전 방식은 한글·화면 배율에 따라 글자가 잘렸다.
         font = tkfont.Font(font=theme.FONT_BUTTON)
         widest = max(theme.unpx(font.measure(label)) for label, _v in options)
-        button_width = int(round(widest)) + 20
+        button_width = width if width is not None else int(round(widest)) + 20
 
         for label, option_value in options:
             button = NeoButton(
@@ -436,6 +439,15 @@ class NeoSegmented(tk.Frame):
         """
         self.value = value
         self._refresh()
+
+    def set_label(self, value, text: str) -> None:
+        """칸 하나의 글자를 바꾼다 (프리셋 이름을 고치면 탭 글자도 따라 바뀌어야 한다).
+
+        모르는 값이면 조용히 넘어간다. 화면이 갱신되는 도중에 불릴 수 있어서다.
+        """
+        button = self._buttons.get(value)
+        if button is not None:
+            button.set_text(text)
 
     def _refresh(self) -> None:
         """고른 것은 움푹 들어가고 글자도 강조색이 된다.

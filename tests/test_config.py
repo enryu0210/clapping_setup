@@ -96,7 +96,7 @@ class TestMissingOrBroken:
         """주석만 남기고 다 지운 상태. 오류가 아니라 '등록된 게 없는' 상태다."""
         write_config("# 아직 아무것도 안 적었다\n")
         config = load_config()
-        assert config.apps == []
+        assert all(preset.is_empty for preset in config.presets)
         assert config.detection == DetectionConfig()   # 기본 기준값
 
 
@@ -110,13 +110,13 @@ apps:
     args: ["F:/dev"]
     delay: 1.5
 """)
-        (app,) = load_config().apps
+        (app,) = load_config().preset_at(2).apps
         assert app == AppEntry(name="VS Code", path="C:/Program Files/Code.exe",
                                type="exe", args=["F:/dev"], delay=1.5, enabled=True)
 
     def test_type을_생략하면_exe(self, write_config):
         write_config('apps:\n  - name: A\n    path: "C:/a.exe"\n')
-        assert load_config().apps[0].type == "exe"
+        assert load_config().preset_at(2).apps[0].type == "exe"
 
     def test_순서가_유지된다(self, write_config):
         """실행 순서가 곧 설정 파일의 순서다. 뒤바뀌면 delay 의미가 없어진다."""
@@ -132,7 +132,7 @@ apps:
     path: "c"
     type: url
 """)
-        assert [a.name for a in load_config().apps] == ["첫째", "둘째", "셋째"]
+        assert [a.name for a in load_config().preset_at(2).apps] == ["첫째", "둘째", "셋째"]
 
     def test_enabled_false_는_실행_대상에서_빠진다(self, write_config):
         write_config("""
@@ -146,8 +146,9 @@ apps:
     enabled: false
 """)
         config = load_config()
-        assert len(config.apps) == 2                       # 목록에는 남아 있고
-        assert [a.name for a in config.enabled_apps] == ["켠것"]   # 실행 대상에서만 빠진다
+        preset = config.preset_at(2)
+        assert len(preset.apps) == 2                       # 목록에는 남아 있고
+        assert [a.name for a in preset.enabled_apps] == ["켠것"]   # 실행 대상에서만 빠진다
 
     def test_path가_없으면_몇_번째인지_알려준다(self, write_config):
         write_config('apps:\n  - name: A\n    path: "a"\n    type: url\n  - name: B\n')
@@ -177,12 +178,12 @@ apps:
     def test_args를_문자열_하나로_적어도_받아준다(self, write_config):
         """흔한 실수라 굳이 죽이지 않는다. 의도가 명백하기 때문이다."""
         write_config('apps:\n  - name: A\n    path: "a"\n    type: url\n    args: "F:/dev"\n')
-        assert load_config().apps[0].args == ["F:/dev"]
+        assert load_config().preset_at(2).apps[0].args == ["F:/dev"]
 
     def test_args의_숫자는_문자열로_바뀐다(self, write_config):
         """subprocess 는 문자열만 받는다. 여기서 안 바꾸면 실행 순간에 죽는다."""
         write_config('apps:\n  - name: A\n    path: "a"\n    type: url\n    args: [8080]\n')
-        assert load_config().apps[0].args == ["8080"]
+        assert load_config().preset_at(2).apps[0].args == ["8080"]
 
     @pytest.mark.parametrize("delay", ["빠르게", -1])
     def test_delay가_이상하면_거부한다(self, write_config, delay):
@@ -280,5 +281,6 @@ def test_저장소의_예시_파일은_항상_유효해야_한다():
         pytest.skip("예시 파일이 없는 환경(설치본 등)")
 
     config = load_config(example)
-    assert config.apps, "예시 파일에는 앱이 최소 하나는 들어 있어야 한다"
-    assert all(app.type in ("exe", "url", "folder", "store") for app in config.apps)
+    assert config.filled_presets, "예시 파일에는 프리셋이 최소 하나는 들어 있어야 한다"
+    assert all(app.type in ("exe", "url", "folder", "store")
+               for preset in config.presets for app in preset.apps)

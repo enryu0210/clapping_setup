@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "clap-launcher"
 version = "1.0.0"
-description = "박수 두 번으로 업무용 프로그램을 한 번에 실행하는 Windows 유틸리티"
+description = "박수 횟수(2~5번)에 따라 다른 프로그램 묶음을 한 번에 실행하는 Windows 유틸리티"
 requires-python = ">=3.12"
 dependencies = [
     "sounddevice>=0.4.6",

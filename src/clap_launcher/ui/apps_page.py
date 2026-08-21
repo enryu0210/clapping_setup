@@ -1,4 +1,4 @@
-"""프로그램 설정 화면 — 박수 치면 실행할 목록을 편집한다.
+"""프로그램 설정 화면 — 박수 횟수별로 실행할 목록(프리셋)을 편집한다.
 
 이 화면이 없던 시절에는 `config/apps.yaml` 을 메모장으로 열어 고쳐야 했다.
 경로에 역슬래시를 잘못 쓰거나 들여쓰기가 어긋나면 프로그램이 뜨지 않았고,
@@ -8,23 +8,32 @@
    그 대신 직전 파일이 apps.yaml.bak 으로 남는다. 자세한 배경은 config.py 의 '저장' 부분.
 
 화면 구성:
-  위  — 등록된 항목 목록 (순서 = 실행 순서)
-  가운데 — 목록을 다루는 버튼들 (추가·삭제·순서·켜고 끄기)
+  맨 위 — 프리셋 탭 (2·3·4·5번). 고른 탭이 곧 '박수 몇 번에 켤 묶음인가'다
+  그 아래 — 이 프리셋의 이름
+  가운데 — 등록된 항목 목록 (순서 = 실행 순서) + 목록을 다루는 버튼들
   아래 — 고른 항목 하나를 고치는 입력칸들
+
+⚠️ 탭을 바꾸면 목록이 통째로 갈린다. 편집 중이던 내용을 넘어가기 **전에** 반드시
+   _commit_form 으로 저장해야 한다. 안 그러면 방금 친 글자가 조용히 사라진다.
 """
 
 import tkinter as tk
+from dataclasses import dataclass
 from tkinter import filedialog, messagebox, ttk
 
 from ..config import (
+    CLAP_COUNTS,
     VALID_APP_TYPES,
     AppEntry,
     AudioConfig,
     Config,
     ConfigError,
     DetectionConfig,
+    Preset,
+    default_presets,
     find_config_path,
     load_config,
+    normalize_presets,
     save_config,
 )
 from . import icons, theme
@@ -45,6 +54,12 @@ PATH_HINTS = {
     "store": "스토어 앱 ID — 'Win+R → shell:AppsFolder' 에서 확인 (docs/CONFIG.md 3장)",
 }
 
+# 프리셋 탭 칸 하나의 너비(96 DPI 기준). 글자에 맞춰 자동으로 잡지 않고 고정하는 이유:
+# 이름을 고치면 탭 글자가 따라 바뀌는데, 너비는 만들 때 한 번만 정해진다.
+# 짧은 이름에 맞춰 만들어두면 이름을 길게 고치는 순간 글자가 잘린다.
+PRESET_TAB_WIDTH = 118
+PRESET_NAME_LIMIT = 6      # 탭에 보여줄 이름 길이. 넘으면 뒤를 …로 접는다
+
 
 class AppsPage(ttk.Frame):
     """실행할 프로그램 목록 편집 화면."""
@@ -57,7 +72,10 @@ class AppsPage(ttk.Frame):
         super().__init__(parent, padding=(theme.px(24), theme.px(18)))
         self.on_done = on_done
 
-        self.entries: list[AppEntry] = []
+        # 프리셋은 항상 2~5번 네 칸이다 (config.normalize_presets 가 보장한다).
+        # '지금 어느 탭을 보고 있는가'는 claps 하나로 표현된다 — 번호가 곧 정체성이다.
+        self.presets: list[Preset] = default_presets()
+        self.claps: int = CLAP_COUNTS[0]
         self.selected: int | None = None
         self._dirty = False          # 저장하지 않은 변경이 있는가
         self._filling_form = False   # 화면이 칸을 채우는 중 (사용자 입력과 구분하기 위함)
@@ -73,8 +91,27 @@ class AppsPage(ttk.Frame):
 
         self._load_existing()
         self._build()
+        self._fill_preset_name()
         self._refresh_list()
         self._fill_form()
+
+    # ── 지금 보고 있는 프리셋 ──────────────────────────────
+    @property
+    def preset(self) -> Preset:
+        """지금 탭이 가리키는 프리셋. 네 칸이 늘 있으므로 None 이 될 일이 없다."""
+        return self._preset_at(self.claps)
+
+    def _preset_at(self, claps: int) -> Preset:
+        return next(p for p in self.presets if p.claps == claps)
+
+    @property
+    def entries(self) -> list[AppEntry]:
+        """지금 프리셋의 항목 목록.
+
+        ⚠️ 복사본이 아니라 **원본 목록 그대로**다. 여기에 append/del 한 것이 곧
+           프리셋에 반영된다. 복사본을 돌려주면 편집이 조용히 사라진다.
+        """
+        return self.preset.apps
 
     # ── 파일 읽기 ──────────────────────────────────────────
     def _load_existing(self) -> None:
@@ -86,9 +123,13 @@ class AppsPage(ttk.Frame):
             config = load_config()
         except ConfigError:
             return          # 파일이 없는 첫 사용 — 빈 목록에서 시작하면 된다
-        self.entries = list(config.apps)
+        self.presets = normalize_presets(config.presets)
         self._detection = config.detection
         self._audio = config.audio
+        # 이미 등록된 게 있으면 그 탭부터 보여준다. 매번 2번 탭에서 시작하면
+        # 3번만 쓰는 사람은 들어올 때마다 탭을 한 번 더 눌러야 한다.
+        filled = [p for p in self.presets if p.apps]
+        self.claps = filled[0].claps if filled else CLAP_COUNTS[0]
 
     # ── 화면 구성 ──────────────────────────────────────────
     def _build(self) -> None:
@@ -97,19 +138,95 @@ class AppsPage(ttk.Frame):
         header.pack(anchor="w")
         icons.draw(header, "list", theme.px(16), theme.px(20), theme.px(26),
                    theme.ACCENT, width=2)
-        header.create_text(theme.px(38), theme.px(21), text="박수 치면 실행할 프로그램",
+        header.create_text(theme.px(38), theme.px(21), text="박수 횟수별 실행 목록",
                            anchor="w", fill=theme.FG, font=theme.FONT_TITLE)
 
-        ttk.Label(self, text="위에서 아래 순서대로 실행됩니다. 항목을 골라 아래에서 고치세요.",
-                  style="Muted.TLabel").pack(anchor="w", pady=(theme.px(4), theme.px(8)))
+        ttk.Label(self, text="박수 횟수를 고르고, 그때 켤 프로그램을 위에서 아래 순서로 등록하세요.",
+                  style="Muted.TLabel").pack(anchor="w", pady=(theme.px(2), theme.px(6)))
 
+        self._build_preset_tabs()
         self._build_list()
         self._build_list_buttons()
         self._build_form()
         self._build_footer()
 
+    def _build_preset_tabs(self) -> None:
+        """프리셋 탭 + 이름칸. 이 화면에서 가장 먼저 보여야 할 것이라 맨 위에 둔다."""
+        self.preset_tabs = NeoSegmented(
+            self, options=[(self._tab_label(count), count) for count in CLAP_COUNTS],
+            value=self.claps, command=self._on_preset_change, width=PRESET_TAB_WIDTH,
+        )
+        self.preset_tabs.pack(anchor="w", pady=(0, theme.px(4)))
+
+        row = ttk.Frame(self)
+        row.pack(anchor="w", fill="x", pady=(0, theme.px(6)))
+        ttk.Label(row, text="이 묶음의 이름 (예: 일 · 취미 · 휴식)",
+                  style="Small.TLabel").pack(side="left", padx=(0, theme.px(8)))
+        self.preset_name_entry = ttk.Entry(row, style="Neo.TEntry", width=16,
+                                           font=theme.FONT_BODY)
+        self.preset_name_entry.pack(side="left")
+        self.preset_name_entry.bind("<KeyRelease>", self._on_preset_name_change)
+
+    def _tab_label(self, claps: int) -> str:
+        """'3번 · 취미' 형태의 탭 글자. 이름이 길면 뒤를 접는다(탭 너비가 고정이라).
+
+        비어 있는 프리셋은 이름 대신 '비어 있음'을 보여준다. 기본 이름(일·취미…)을
+        그대로 띄우면 등록도 안 했는데 준비된 것처럼 보인다.
+        """
+        preset = self._preset_at(claps)
+        if not preset.apps:
+            return f"{claps}번 · 비어 있음"
+        name = preset.display_name
+        if len(name) > PRESET_NAME_LIMIT:
+            name = name[:PRESET_NAME_LIMIT] + "…"
+        return f"{claps}번 · {name}"
+
+    def _refresh_tab_labels(self) -> None:
+        """탭 글자를 지금 상태에 맞춘다 (이름을 고치거나 항목을 넣고 뺐을 때)."""
+        for count in CLAP_COUNTS:
+            self.preset_tabs.set_label(count, self._tab_label(count))
+
+    def _on_preset_change(self) -> None:
+        """다른 박수 횟수 탭으로 옮겼을 때.
+
+        ⚠️ 순서가 중요하다. 넘어가기 **전에** 지금 칸의 내용을 원래 프리셋에 저장한다.
+           탭을 먼저 바꿔버리면 방금 친 글자가 엉뚱한 프리셋에 들어간다.
+        """
+        self._commit_form()
+        self._commit_preset_name()
+        self.claps = int(self.preset_tabs.value)
+        # 항목 번호는 프리셋마다 따로다. 3번 프리셋에서 2번째를 고른 상태로
+        # 4번 탭에 가면 없는 항목을 가리키게 되므로 선택을 놓는다.
+        self.selected = None
+        self._form_index = None
+        self._fill_preset_name()
+        self._refresh_list()
+        self._fill_form()
+
+    def _fill_preset_name(self) -> None:
+        """이름칸에 지금 프리셋의 이름을 채운다."""
+        self._filling_form = True
+        try:
+            self.preset_name_entry.delete(0, tk.END)
+            self.preset_name_entry.insert(0, self.preset.name)
+        finally:
+            self._filling_form = False
+
+    def _commit_preset_name(self) -> None:
+        """이름칸의 글자를 프리셋에 반영한다. 비워두면 기본 이름이 쓰인다."""
+        self.preset.name = self.preset_name_entry.get().strip()
+
+    def _on_preset_name_change(self, _event=None) -> None:
+        if self._filling_form:
+            return
+        self._commit_preset_name()
+        self._refresh_tab_labels()
+        self._mark_dirty()
+
     def _build_list(self) -> None:
-        panel = NeoPanel(self, width=PANEL_WIDTH, height=126, padding=10)
+        # 프리셋 탭이 자리를 차지하면서 목록 높이를 조금 줄였다. 한 묶음에 8개까지
+        # 넣는 사람은 드물고, 넘치면 스크롤로 볼 수 있다.
+        panel = NeoPanel(self, width=PANEL_WIDTH, height=106, padding=10)
         panel.pack(anchor="w")
 
         scrollbar = ttk.Scrollbar(panel.body, orient="vertical")
@@ -229,10 +346,18 @@ class AppsPage(ttk.Frame):
                 # 꺼둔 항목은 흐리게 — 지운 것과 헷갈리지 않게 한다
                 self.listbox.itemconfig(tk.END, foreground=theme.FG_MUTED)
 
+        if not self.entries:
+            # 빈 목록에 아무 말도 없으면 고장 난 것처럼 보인다. 다음에 할 일을 알려준다.
+            self.listbox.insert(tk.END, f"  박수 {self.claps}번에 켤 프로그램이 아직 없습니다"
+                                        " — [추가] 를 누르세요")
+            self.listbox.itemconfig(tk.END, foreground=theme.FG_MUTED)
+
         if self.selected is not None and 0 <= self.selected < len(self.entries):
             self.listbox.selection_clear(0, tk.END)
             self.listbox.selection_set(self.selected)
             self.listbox.see(self.selected)
+        # 항목을 넣고 뺐으면 탭의 '비어 있음' 표시도 달라져야 한다
+        self._refresh_tab_labels()
         self._refresh_buttons()
 
     def _refresh_buttons(self) -> None:
@@ -246,7 +371,9 @@ class AppsPage(ttk.Frame):
     def _on_select(self, _event=None) -> None:
         """목록에서 다른 항목을 골랐을 때. 먼저 지금 칸의 내용을 저장하고 넘어간다."""
         selection = self.listbox.curselection()
-        if not selection:
+        # 목록이 비었을 때 보이는 안내문도 '고를 수 있는 줄'이라 눌리면 여기 들어온다.
+        # 그걸 항목으로 착각하면 없는 항목을 지우려 들게 된다.
+        if not selection or not self.entries:
             return
         self._commit_form()
         self.selected = selection[0]
@@ -382,13 +509,19 @@ class AppsPage(ttk.Frame):
 
     def _save(self) -> None:
         self._commit_form()
+        self._commit_preset_name()
 
-        problem = _first_problem(self.entries)
+        # ⚠️ 지금 보고 있는 탭만이 아니라 **모든 프리셋**을 검사한다. 3번 탭에서 경로를
+        #    비워둔 채 4번 탭으로 옮겨 저장하면, 그 항목은 화면에 안 보이지만 파일에는 들어간다.
+        problem = _first_problem(self.presets)
         if problem is not None:
-            self._set_status(f"⚠ {problem}", theme.ERROR)
+            # 문제가 있는 탭으로 데려다준다. "어디가 문제인지"를 글로만 알려주면
+            # 사용자는 탭 네 개를 뒤져야 한다.
+            self._jump_to(problem.claps)
+            self._set_status(f"⚠ {problem.message}", theme.ERROR)
             return
 
-        config = Config(detection=self._detection, apps=self.entries, audio=self._audio)
+        config = Config(detection=self._detection, presets=self.presets, audio=self._audio)
         try:
             path = save_config(config)
         except (ConfigError, OSError) as exc:
@@ -399,9 +532,22 @@ class AppsPage(ttk.Frame):
         print(f"설정을 저장했습니다: {path}")   # 콘솔에도 남겨 두면 문제 추적이 쉽다
         self.on_done()
 
+    def _jump_to(self, claps: int) -> None:
+        """그 박수 횟수의 탭으로 화면을 옮긴다 (저장할 때 문제가 있는 곳을 보여주기 위함)."""
+        if claps == self.claps:
+            return
+        self.claps = claps
+        self.selected = None
+        self._form_index = None
+        self.preset_tabs.set(claps)      # set 은 command 를 부르지 않는다 (재귀 방지)
+        self._fill_preset_name()
+        self._refresh_list()
+        self._fill_form()
+
     def _cancel(self) -> None:
         """고치던 것을 버리고 돌아간다. 실수로 날리는 일이 없게 한 번 물어본다."""
         self._commit_form()
+        self._commit_preset_name()
         if self._dirty and not messagebox.askyesno(
                 "취소", "저장하지 않은 변경이 있습니다. 버리고 돌아갈까요?", parent=self):
             return
@@ -438,16 +584,27 @@ def _parse_delay_text(text: str) -> float:
     return max(0.0, value)
 
 
-def _first_problem(entries: list[AppEntry]) -> str | None:
+@dataclass(frozen=True)
+class Problem:
+    """저장을 막는 문제 하나. 어느 프리셋인지까지 들고 다녀야 그 탭으로 데려다줄 수 있다."""
+
+    claps: int
+    message: str
+
+
+def _first_problem(presets: list[Preset]) -> Problem | None:
     """저장 전 검사. 문제가 있으면 **첫 번째 것만** 알려준다.
 
     한 번에 다 쏟아내면 어디부터 고쳐야 할지 알기 어렵다.
     """
-    for order, entry in enumerate(entries, start=1):
-        if not entry.name.strip():
-            return f"{order}번째 항목에 이름이 없습니다."
-        if not entry.path.strip():
-            return f"'{entry.name}' 의 경로가 비어 있습니다."
-        if entry.type not in VALID_APP_TYPES:
-            return f"'{entry.name}' 의 종류가 잘못됐습니다: {entry.type}"
+    for preset in presets:
+        for order, entry in enumerate(preset.apps, start=1):
+            where = f"박수 {preset.claps}번 묶음의 "
+            if not entry.name.strip():
+                return Problem(preset.claps, f"{where}{order}번째 항목에 이름이 없습니다.")
+            if not entry.path.strip():
+                return Problem(preset.claps, f"{where}'{entry.name}' 경로가 비어 있습니다.")
+            if entry.type not in VALID_APP_TYPES:
+                return Problem(preset.claps,
+                               f"{where}'{entry.name}' 종류가 잘못됐습니다: {entry.type}")
     return None

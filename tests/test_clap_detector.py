@@ -164,6 +164,87 @@ class TestShouldNotTrigger:
         assert not triggered
 
 
+# ── 박수 개수 세기 (프리셋의 근간) ─────────────────────────
+
+def claps_at(rng, count: int, gap_sec: float = 0.28):
+    """박수를 정해진 개수만큼 일정 간격으로 친 스트림.
+
+    ⚠️ 뒤에 넉넉히 여유를 둔다. 묶음은 '마지막 박수 후 조용해진 순간'에 확정되므로,
+       스트림이 그 전에 끝나면 발동이 아예 일어나지 않는다.
+    """
+    events = [(FIRST_SOUND_AT + i * gap_sec, normalize(clap(rng))) for i in range(count)]
+    return build_stream(events, duration_sec=FIRST_SOUND_AT + count * gap_sec + 2.0, rng=rng)
+
+
+def triggered_counts(stream, config: DetectionConfig | None = None) -> list[int]:
+    """발동한 묶음들의 박수 개수. 발동이 없었으면 빈 목록."""
+    _triggered, events = run_detector(stream, config)
+    return [event.clap_count for event in events if event.triggered]
+
+
+class TestClapCounting:
+    """⭐ 프리셋의 전부: 몇 번 쳤는지를 정확히 세는 것.
+
+    하나만 잘못 세면 엉뚱한 프로그램 묶음이 통째로 켜진다.
+    """
+
+    @pytest.mark.parametrize("count", [2, 3, 4, 5])
+    def test_친_만큼_정확히_센다(self, rng, count):
+        assert triggered_counts(claps_at(rng, count)) == [count]
+
+    def test_한_번만_치면_발동하지_않는다(self, rng):
+        """물건을 떨어뜨려도 한 번은 난다. 그걸로 프로그램이 켜지면 곤란하다."""
+        assert triggered_counts(claps_at(rng, 1)) == []
+
+    @pytest.mark.parametrize("gap", [0.18, 0.4, 0.7])
+    def test_박수_속도가_달라도_개수는_같다(self, rng, gap):
+        """사람마다 박수 속도가 다르다. 개수는 속도와 무관해야 한다."""
+        assert triggered_counts(claps_at(rng, 3, gap_sec=gap)) == [3]
+
+    def test_리미터가_걸려도_개수가_맞는다(self, rng):
+        """⭐ 클리핑 가드가 걸린 마이크에서는 뒤쪽 박수가 작아진다.
+
+        2번이 맞는 것만으로는 부족하다. 뒤로 갈수록 작아지므로 개수가 많을수록
+        놓칠 위험이 커진다 — 놓치면 4번이 3번이 되어 다른 묶음이 켜진다.
+        """
+        assert triggered_counts(apply_limiter(claps_at(rng, 4))) == [4]
+
+    def test_간격이_벌어지면_다른_묶음으로_나뉜다(self, rng):
+        """짝짝 … (한참 뒤) … 짝짝 은 4번이 아니라 2번짜리 두 묶음이다."""
+        events = [(FIRST_SOUND_AT + offset, normalize(clap(rng)))
+                  for offset in (0.0, 0.25, 1.6, 1.85)]
+        stream = build_stream(events, 4.0, rng)
+        assert triggered_counts(stream, DetectionConfig(cooldown_sec=0.5)) == [2, 2]
+
+    def test_잔향은_세지_않는다(self, rng):
+        """⭐ 방이 울리면 박수 하나가 둘로 들린다. 그대로 세면 2번이 3번이 된다."""
+        events = [(FIRST_SOUND_AT, normalize(clap(rng))),
+                  (FIRST_SOUND_AT + 0.05, normalize(clap(rng), peak=0.4)),  # 잔향
+                  (FIRST_SOUND_AT + 0.3, normalize(clap(rng)))]
+        stream = build_stream(events, 3.0, rng)
+        assert triggered_counts(stream) == [2]
+
+    def test_마지막_박수_직후에는_아직_발동하지_않는다(self, rng):
+        """⭐ 바로 발동하면 세 번째 박수를 칠 기회가 없다 — 프리셋이 성립하지 않는다."""
+        detector = ClapDetector(DetectionConfig(), SAMPLE_RATE)
+        stream = claps_at(rng, 2)
+        last_clap_at = None
+        fired_at = None
+        for frame, now in frames_of(stream):
+            event = detector.feed(frame, now)
+            if event is None:
+                continue
+            if event.triggered:
+                fired_at = now
+                break
+            if event.is_clap and not event.reject_reason:
+                last_clap_at = now
+
+        assert fired_at is not None and last_clap_at is not None
+        # 두 번째 박수를 들은 뒤 max_interval(0.8초)만큼 더 기다렸다가 발동해야 한다
+        assert fired_at - last_clap_at > 0.5
+
+
 # ── 쿨다운 ────────────────────────────────────────────────
 
 class TestCooldown:

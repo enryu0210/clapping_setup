@@ -42,6 +42,12 @@ class Settings:
     auto_arm_on_unlock: bool = True   # 화면 잠금이 풀리면 자동으로 듣기 시작
     listen_timeout_min: float = 5.0   # 이 시간 동안 박수가 없으면 자동으로 멈춤 (0=무제한)
 
+    # ── 실행 직전 취소 시간 (자세한 배경은 ui/main_page.py 의 취소 배너 부분) ──
+    # 박수 횟수를 하나 잘못 세면 엉뚱한 프리셋이 통째로 켜진다. 2번짜리 오탐보다
+    # 체감 피해가 훨씬 커서, 실행 전에 되돌릴 틈을 준다. 0 으로 두면 곧바로 실행한다.
+    # (화면에는 노출하지 않는다 — 대부분의 사람에게 기본값이 맞고, 옵션이 늘수록 화면이 무거워진다)
+    launch_confirm_sec: float = 3.0
+
     # ── 트레이 상주 (자세한 배경은 ui/tray.py 참고) ──
     minimize_to_tray: bool = True     # 창을 닫으면 종료하지 않고 트레이로 내려간다
     tray_notice_shown: bool = False   # '트레이로 내려갔다'는 안내를 이미 보여줬는가

@@ -43,8 +43,11 @@ class MonitorSnapshot:
     #    화면이 "새 이벤트가 없다"고 착각하고 로그가 멈춘다(실제로 발생했던 버그).
     #    그래서 **한 번도 줄지 않는 누적 개수**를 따로 둔다.
     event_count: int = 0                     # 지금까지 분석한 소리의 누적 개수
-    trigger_count: int = 0                   # '짝짝'이 완성된 횟수
+    trigger_count: int = 0                   # 박수 묶음이 확정된 횟수
     last_trigger_at: float = 0.0             # 마지막 발동 시각 (monotonic)
+    # 마지막으로 확정된 묶음의 박수 개수. **어떤 프리셋을 켤지가 이 값으로 정해진다.**
+    # trigger_count 만으로는 "발동했다"만 알 뿐 몇 번 쳤는지 알 수 없어 따로 둔다.
+    last_trigger_claps: int = 0
 
     @property
     def is_loud_enough(self) -> bool:
@@ -119,6 +122,7 @@ class AudioMonitor:
             level_dbfs=SILENCE_DBFS, peak_dbfs=SILENCE_DBFS, session_max_dbfs=SILENCE_DBFS,
             device_desc="", error="", running=True,
             events=(), event_count=0, trigger_count=0, last_trigger_at=0.0,
+            last_trigger_claps=0,
         )
         # daemon=True : 창을 강제로 닫아도 이 스레드가 프로그램을 붙잡고 있지 않게
         self._thread = threading.Thread(
@@ -178,6 +182,7 @@ class AudioMonitor:
                             if event.triggered:
                                 changes["trigger_count"] = snapshot.trigger_count + 1
                                 changes["last_trigger_at"] = now
+                                changes["last_trigger_claps"] = event.clap_count
 
                     self._update(**changes)
         except AudioDeviceError as exc:

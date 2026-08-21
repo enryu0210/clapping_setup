@@ -13,9 +13,14 @@
        · 날카로운가            → 둔탁한 소리 배제
        · 짧게 끝났는가        → 종이·음악 배제
      ↓
-  [3] 박수 1회 인정 → 시각 기록
+  [3] 박수 1회 인정 → 묶음에 한 개 더 센다
      ↓
-  [4] 0.15~0.8초 안에 또 한 번? → 🎉 발동
+  [4] 마지막 박수 후 0.8초(max_interval_ms) 동안 조용하면 → 묶음 확정 → 🎉 발동
+
+⚠️ [4]가 '두 번째 박수를 듣는 순간'이 아니라 '조용해진 순간'인 이유:
+   프리셋 때문이다. 2번·3번·4번·5번이 서로 다른 프로그램 묶음을 켜야 하는데,
+   두 번째 박수에서 바로 발동해 버리면 세 번째 박수를 칠 기회가 영영 없다.
+   대가는 마지막 박수 후 0.8초의 지연이고, 얻는 것은 2~5번을 한 방식으로 다루는 일관성이다.
 
 ⚠️ 설계 포인트: 현재 시각을 내부에서 time.time() 으로 읽지 않고 인자로 받는다.
    그래야 테스트에서 시간을 마음대로 조작해 "0.5초 뒤 두 번째 박수" 같은 상황을
@@ -36,12 +41,15 @@ ANALYSIS_MS = 160.0        # 소리 하나를 판단하기 위해 들여다보�
 PRE_ROLL_MS = 20.0         # 시작점보다 살짝 앞에서부터 본다 (시작 순간이 잘리지 않게)
 ANALYSIS_DELAY_MS = 120.0  # 시작점을 잡은 뒤 이만큼 기다렸다 분석한다 (소리가 끝나기를 기다림)
 
+# 묶음으로 인정하는 최소 박수 개수. 한 번은 물건을 떨어뜨려도 날 수 있어 발동시키지 않는다.
+MIN_RUN_CLAPS = 2
+
 
 class State(Enum):
     """감지기의 현재 상태."""
 
     IDLE = auto()      # 대기 — 첫 박수를 기다림
-    ARMED = auto()     # 첫 박수를 들음 — 제한 시간 안에 두 번째를 기다림
+    ARMED = auto()     # 박수를 세는 중 — 조용해질 때까지 개수를 늘려간다
     COOLDOWN = auto()  # 방금 발동함 — 잠시 아무것도 감지하지 않음
 
 
@@ -53,7 +61,10 @@ class SoundEvent:
     features: EventFeatures
     is_clap: bool
     reject_reason: str = ""      # 박수가 아니라고 판단한 이유 (비어 있으면 박수)
-    triggered: bool = False      # 이 이벤트로 '짝짝'이 완성되었는가
+    triggered: bool = False      # 이 이벤트로 박수 묶음이 확정되었는가
+    # 박수 묶음에서 몇 번째인지. triggered 인 이벤트에서는 **묶음의 총 개수**가 되고,
+    # 이 값이 곧 어떤 프리셋을 켤지를 정한다. 박수가 아닌 소리에서는 0.
+    clap_count: int = 0
 
     def describe(self) -> str:
         mark = "👏 박수" if self.is_clap else f"✗ {self.reject_reason}"
@@ -76,6 +87,10 @@ class ClapDetector:
 
         self._pending_analysis_at: float | None = None   # 이 시각이 되면 분석한다
         self._last_clap_at: float | None = None
+        self._run_count = 0                              # 지금 세고 있는 묶음의 박수 개수
+        # 묶음이 확정될 때 만들 이벤트에 붙일 지문. 확정은 '조용해진 순간'에 일어나서
+        # 그때는 분석할 소리가 없다. 마지막 박수의 지문을 들고 있다가 그대로 쓴다.
+        self._last_features: EventFeatures | None = None
         self._cooldown_until: float | None = None
 
     def reset(self) -> None:
@@ -86,14 +101,19 @@ class ClapDetector:
         self._buffered_samples = 0
         self._pending_analysis_at = None
         self._last_clap_at = None
+        self._run_count = 0
+        self._last_features = None
         self._cooldown_until = None
 
     # ── 메인 진입점 ───────────────────────────────────────
     def feed(self, frame: np.ndarray, now: float) -> SoundEvent | None:
-        """프레임 하나를 넣는다. 소리 하나의 분석이 끝난 순간에만 결과를 돌려준다.
+        """프레임 하나를 넣는다. 결과가 나온 순간에만 이벤트를 돌려준다.
 
-        '짝짝'이 완성됐는지는 결과의 triggered 로 확인한다.
-        박수가 아닌 소리도 결과를 돌려주는데, 디버깅 화면에서 "무엇을 왜 걸렀는지"
+        이벤트가 나오는 순간은 두 가지다.
+          · 소리 하나의 분석이 끝났을 때 (박수든 아니든 — 화면 로그용)
+          · 박수 묶음이 확정됐을 때 (triggered=True, clap_count=총 개수)
+
+        박수가 아닌 소리도 돌려주는 이유: 디버깅 화면에서 "무엇을 왜 걸렀는지"
         보여주기 위해서다. 튜닝할 때 이 정보가 없으면 원인을 못 찾는다.
         """
         self._push(frame)
@@ -103,15 +123,16 @@ class ClapDetector:
             self._cooldown_until = None
             self.state = State.IDLE
 
-        # 첫 박수를 듣고 너무 오래 지났으면 잊는다.
+        # 마지막 박수 후 충분히 조용했으면 묶음을 확정한다 — 여기가 발동 지점이다.
         # ⚠️ 시간 기준을 맞추는 게 중요하다. _last_clap_at 은 '소리가 난 시각'인데
         #    now 는 '지금 프레임 시각'이라, 그대로 비교하면 분석 지연(120ms)만큼
         #    간격이 부풀려져서 허용 범위 안의 박수를 놓친다. now 도 소리 기준으로 바꿔 비교한다.
         if (self.state == State.ARMED and self._last_clap_at is not None
                 and (self._sound_time(now) - self._last_clap_at) * 1000
                 > self.config.max_interval_ms):
-            self.state = State.IDLE
-            self._last_clap_at = None
+            # 분석 대기 중인 소리가 있어도 그건 다음 프레임(10ms 뒤)에 처리된다.
+            # _pending_analysis_at 을 지우지 않으므로 조건이 그대로 유지되기 때문이다.
+            return self._finish_run(now)
 
         # 시작점을 잡은 뒤 소리가 끝나길 기다렸다가 분석한다
         if self._pending_analysis_at is not None:
@@ -123,6 +144,25 @@ class ClapDetector:
         if self._onset.feed(high_band_dbfs(frame, self.sample_rate), now):
             self._pending_analysis_at = now + ANALYSIS_DELAY_MS / 1000.0
         return None
+
+    def _finish_run(self, now: float) -> SoundEvent | None:
+        """세고 있던 묶음을 마감한다. 2개 이상이면 발동 이벤트를, 아니면 None 을 돌려준다."""
+        count = self._run_count
+        features = self._last_features
+        self._run_count = 0
+        self._last_clap_at = None
+
+        if count < MIN_RUN_CLAPS or features is None:
+            # 박수 한 번짜리 — 물건을 떨어뜨렸거나 오탐이다. 조용히 없던 일로 한다.
+            self.state = State.IDLE
+            return None
+
+        # 확정했으면 쿨다운으로 들어간다. 개수를 잘못 셌다고 곧바로 다시 치는 상황에서
+        # 두 시도가 한 묶음으로 섞이는 것을 막는 역할도 한다.
+        self.state = State.COOLDOWN
+        self._cooldown_until = now + self.config.cooldown_sec
+        return SoundEvent(time=now, features=features, is_clap=True,
+                          triggered=True, clap_count=count)
 
     # ── 내부 구현 ─────────────────────────────────────────
     @staticmethod
@@ -148,39 +188,48 @@ class ClapDetector:
         return np.concatenate(self._buffer)[-self._buffer_size:]
 
     def _analyze(self, now: float) -> SoundEvent:
-        """모아둔 소리를 분석해 박수인지 판정하고, 짝짝 완성 여부까지 처리한다."""
+        """모아둔 소리를 분석해 박수인지 판정하고, 묶음의 개수를 늘린다.
+
+        ⚠️ 여기서는 발동하지 않는다. 발동은 조용해진 뒤 _finish_run 이 한다.
+           세 번째 박수가 올지 아직 모르기 때문이다.
+        """
         features = extract_event_features(self._recent_segment(), self.sample_rate)
         reason = self._reject_reason(features)
 
         if reason:
             return SoundEvent(time=now, features=features, is_clap=False, reject_reason=reason)
 
-        # 쿨다운 중이면 박수로 인정은 하되 발동시키지 않는다
+        # 쿨다운 중이면 박수로 인정은 하되 세지 않는다
         if self._cooldown_until is not None:
             return SoundEvent(time=now, features=features, is_clap=True,
                               reject_reason="쿨다운 중")
 
-        # 두 번째 박수인지 확인한다.
         # 시각 기준을 '분석 시각'이 아니라 '소리가 난 시각'으로 맞추기 위해
         # 분석 지연만큼 빼준다. 안 그러면 간격이 실제보다 길게 나온다.
         clap_at = self._sound_time(now)
 
         if self.state == State.ARMED and self._last_clap_at is not None:
             gap_ms = (clap_at - self._last_clap_at) * 1000
-            if self.config.min_interval_ms <= gap_ms <= self.config.max_interval_ms:
-                self.state = State.COOLDOWN
-                self._cooldown_until = now + self.config.cooldown_sec
-                self._last_clap_at = None
-                return SoundEvent(time=now, features=features, is_clap=True, triggered=True)
             if gap_ms < self.config.min_interval_ms:
-                # 너무 빠르다 = 첫 박수의 여운일 가능성이 높다. 첫 박수 기억은 유지한다.
+                # 너무 빠르다 = 직전 박수의 여운일 가능성이 높다. 세지 않고, 묶음은 유지한다.
+                # (여기서 개수를 늘리면 잔향 하나에 3번 프리셋이 켜진다)
                 return SoundEvent(time=now, features=features, is_clap=True,
-                                  reject_reason="간격이 너무 짧음")
+                                  reject_reason="간격이 너무 짧음", clap_count=self._run_count)
+            # 간격이 max_interval 을 넘는 경우는 위 feed() 의 확정 로직이 이미 처리했으므로
+            # 여기까지 오지 않는다. 만약 온다면 새 묶음의 첫 박수로 보는 것이 안전하다.
+            if gap_ms <= self.config.max_interval_ms:
+                self._run_count += 1
+                self._last_clap_at = clap_at
+                self._last_features = features
+                return SoundEvent(time=now, features=features, is_clap=True,
+                                  clap_count=self._run_count)
 
-        # 첫 박수로 기록한다
+        # 새 묶음의 첫 박수
         self.state = State.ARMED
+        self._run_count = 1
         self._last_clap_at = clap_at
-        return SoundEvent(time=now, features=features, is_clap=True)
+        self._last_features = features
+        return SoundEvent(time=now, features=features, is_clap=True, clap_count=1)
 
     def _reject_reason(self, f: EventFeatures) -> str:
         """박수가 아니라고 판단한 이유. 박수면 빈 문자열.

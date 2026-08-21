@@ -8,7 +8,13 @@
 
 import pytest
 
-from clap_launcher.config import CONFIG_ENV_VAR, AppEntry, DetectionConfig, load_config
+from clap_launcher.config import (
+    CONFIG_ENV_VAR,
+    AppEntry,
+    DetectionConfig,
+    Preset,
+    load_config,
+)
 from clap_launcher.ui.apps_page import (
     _first_problem,
     _format_delay,
@@ -21,18 +27,27 @@ from clap_launcher.ui.apps_page import (
 EXISTING_CONFIG = """
 detection:
   max_harmonicity: 0.42
-apps:
-  - name: 첫째
-    type: exe
-    path: "C:/a.exe"
-    delay: 1.5
-  - name: 둘째
-    type: url
-    path: "https://b.com"
-  - name: 꺼둔것
-    type: folder
-    path: "F:/dev"
-    enabled: false
+presets:
+  - claps: 2
+    name: 일
+    apps:
+      - name: 첫째
+        type: exe
+        path: "C:/a.exe"
+        delay: 1.5
+      - name: 둘째
+        type: url
+        path: "https://b.com"
+      - name: 꺼둔것
+        type: folder
+        path: "F:/dev"
+        enabled: false
+  - claps: 3
+    name: 취미
+    apps:
+      - name: 게임
+        type: exe
+        path: "C:/game.exe"
 """
 
 
@@ -71,8 +86,8 @@ class TestLoading:
         assert page.entries == []
 
     def test_깨진_파일이어도_열린다(self, make_page):
-        page, _path = make_page("apps:\n  - name: 이름만\n")   # path 누락 = 읽기 실패
-        assert page.entries == []
+        page, _path = make_page("presets:\n  - claps: 2\n    apps:\n      - name: 이름만\n")
+        assert page.entries == []      # path 누락 = 읽기 실패 → 빈 목록으로 시작
 
     def test_꺼둔_항목도_목록에_보인다(self, make_page):
         """지운 것과 꺼둔 것은 다르다. 목록에서 사라지면 지운 줄 안다."""
@@ -192,6 +207,63 @@ class TestForm:
         assert page.name_entry.get() == "둘째"
 
 
+class TestPresetTabs:
+    """⭐ 탭을 바꾸면 목록이 통째로 갈린다. 여기가 어긋나면 편집 내용이 조용히 사라진다."""
+
+    def test_등록된_묶음이_있으면_그_탭부터_보여준다(self, make_page):
+        page, _path = make_page()
+        assert page.claps == 2
+
+    def test_등록된_게_하나도_없으면_2번_탭에서_시작한다(self, make_page):
+        page, _path = make_page(config_text=None)
+        assert page.claps == 2
+
+    def test_탭을_바꾸면_그_묶음의_목록이_보인다(self, make_page):
+        page, _path = make_page()
+        page.preset_tabs._select(3)              # 3번 탭을 실제로 누른 것과 같다
+        assert page.claps == 3
+        assert [e.name for e in page.entries] == ["게임"]
+
+    def test_탭을_바꿔도_고치던_내용이_남는다(self, make_page):
+        """⭐ 넘어가기 전에 입력칸을 저장하지 않으면 방금 친 글자가 사라진다."""
+        page, _path = make_page()
+        page.selected = 0
+        page._fill_form()
+        page.name_entry.delete(0, "end")
+        page.name_entry.insert(0, "고친이름")
+
+        page.preset_tabs._select(3)              # 3번으로 갔다가
+        page.preset_tabs._select(2)              # 다시 2번으로
+
+        assert page.entries[0].name == "고친이름"
+
+    def test_탭을_바꾸면_선택이_풀린다(self, make_page):
+        """항목 번호는 묶음마다 따로다. 그대로 두면 없는 항목을 가리킨다."""
+        page, _path = make_page()
+        page.selected = 2                        # 2번 묶음의 세 번째 항목
+        page.preset_tabs._select(3)              # 3번 묶음에는 항목이 하나뿐이다
+        assert page.selected is None
+
+    def test_빈_묶음에는_다음에_할_일을_알려준다(self, make_page):
+        """빈 목록에 아무 말도 없으면 고장 난 것처럼 보인다."""
+        page, _path = make_page()
+        page.preset_tabs._select(5)
+        assert "추가" in page.listbox.get(0)
+
+    def test_이름을_고치면_탭_글자도_바뀐다(self, make_page):
+        page, _path = make_page()
+        page.preset_name_entry.delete(0, "end")
+        page.preset_name_entry.insert(0, "업무")
+        page._on_preset_name_change()
+
+        assert "업무" in page.preset_tabs._buttons[2].text
+
+    def test_빈_묶음은_탭에_비어_있다고_보여준다(self, make_page):
+        """등록도 안 했는데 기본 이름을 띄우면 준비된 것처럼 보인다."""
+        page, _path = make_page()
+        assert "비어 있음" in page.preset_tabs._buttons[5].text
+
+
 class TestSaving:
     def test_저장하면_파일에_반영되고_돌아간다(self, make_page):
         page, path = make_page()
@@ -202,7 +274,7 @@ class TestSaving:
 
         page._save()
 
-        assert load_config(path).apps[0].name == "새이름"
+        assert load_config(path).preset_at(2).apps[0].name == "새이름"
         assert make_page.done == [True]          # 메인 화면으로 돌아갔다
 
     def test_감지_기준값을_건드리지_않는다(self, make_page):
@@ -210,6 +282,19 @@ class TestSaving:
         page, path = make_page()
         page._save()
         assert load_config(path).detection.max_harmonicity == 0.42
+
+    def test_다른_탭의_문제도_잡고_그_탭으로_데려다준다(self, make_page):
+        """⭐ 지금 안 보는 탭의 잘못된 항목도 파일에는 들어간다. 놓치면 설정이 깨진다."""
+        page, _path = make_page()
+        page.preset_tabs._select(4)              # 4번 탭으로 가서
+        page._add_entry()                        # 경로가 빈 항목을 만들고
+        page.preset_tabs._select(2)              # 2번 탭으로 돌아와 저장
+
+        page._save()
+
+        assert make_page.done == []              # 저장되지 않았고
+        assert page.claps == 4                   # 문제가 있는 탭으로 데려다줬다
+        assert "4번" in page.status_label.cget("text")
 
     def test_경로가_비면_저장하지_않고_알려준다(self, make_page):
         page, path = make_page()
@@ -275,19 +360,29 @@ class TestHelpers:
         assert _parse_delay_text(text) == expected
 
     def test_문제가_없으면_None(self):
-        assert _first_problem([AppEntry(name="A", path="a", type="url")]) is None
+        ok = [Preset(claps=2, apps=[AppEntry(name="A", path="a", type="url")])]
+        assert _first_problem(ok) is None
 
     def test_이름이_없으면_몇_번째인지_알려준다(self):
-        problem = _first_problem([AppEntry(name="  ", path="a", type="url")])
-        assert "1번째" in problem
+        problem = _first_problem(
+            [Preset(claps=2, apps=[AppEntry(name="  ", path="a", type="url")])])
+        assert "1번째" in problem.message
+
+    def test_어느_박수_묶음의_문제인지_알려준다(self):
+        """⭐ 탭이 넷이라 어느 묶음인지 안 알려주면 사용자가 넷을 다 뒤져야 한다."""
+        problem = _first_problem([
+            Preset(claps=2, apps=[AppEntry(name="괜찮음", path="a", type="url")]),
+            Preset(claps=4, apps=[AppEntry(name="문제", path="", type="url")]),
+        ])
+        assert problem.claps == 4 and "4번" in problem.message
 
     def test_문제가_여럿이면_첫_번째만_알려준다(self):
         """한 번에 다 쏟아내면 어디부터 고칠지 알기 어렵다."""
-        problem = _first_problem([
+        problem = _first_problem([Preset(claps=2, apps=[
             AppEntry(name="A", path="", type="url"),
             AppEntry(name="B", path="", type="url"),
-        ])
-        assert "'A'" in problem and "'B'" not in problem
+        ])])
+        assert "'A'" in problem.message and "'B'" not in problem.message
 
 
 def test_기본_감지값은_건드리지_않는다():

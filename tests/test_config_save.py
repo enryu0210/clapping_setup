@@ -17,18 +17,31 @@ from clap_launcher.config import (
     AudioConfig,
     Config,
     DetectionConfig,
+    Preset,
     dump_config_text,
     load_config,
     save_config,
 )
 
 
-def make_config(apps=None, **detection_values) -> Config:
+def make_config(apps=None, claps: int = 2, presets=None, **detection_values) -> Config:
+    """설정 하나를 만든다.
+
+    apps 만 주면 그 목록을 claps(기본 2번) 프리셋에 담는다. 대부분의 테스트가
+    '프리셋 하나'만 신경 쓰기 때문에 그 경우를 짧게 쓸 수 있게 해둔 것이다.
+    """
+    if presets is None:
+        presets = [Preset(claps=claps, apps=apps if apps is not None else [])]
     return Config(
         detection=DetectionConfig(**detection_values),
-        apps=apps if apps is not None else [],
+        presets=presets,
         audio=AudioConfig(),
     )
+
+
+def saved_apps(config: Config, claps: int = 2):
+    """저장·되읽기 뒤 그 프리셋의 항목 목록. 테스트 본문을 짧게 유지하려고 뺐다."""
+    return config.preset_at(claps).apps
 
 
 @pytest.fixture
@@ -51,7 +64,7 @@ class TestRoundTrip:
         save_config(original, config_path)
 
         loaded = load_config(config_path)
-        assert loaded.apps == original.apps
+        assert saved_apps(loaded) == saved_apps(original)
 
     def test_감지_기준값도_함께_보존된다(self, config_path):
         """⭐ 프로그램 목록을 고쳤다고 보정 결과가 날아가면 안 된다."""
@@ -71,24 +84,24 @@ class TestRoundTrip:
     def test_한글_이름이_깨지지_않는다(self, config_path):
         save_config(make_config([AppEntry(name="업무 브라우저", path="https://a.com",
                                           type="url")]), config_path)
-        assert load_config(config_path).apps[0].name == "업무 브라우저"
+        assert saved_apps(load_config(config_path))[0].name == "업무 브라우저"
 
     def test_빈_목록도_저장하고_읽을_수_있다(self, config_path):
         save_config(make_config([]), config_path)
-        assert load_config(config_path).apps == []
+        assert all(preset.is_empty for preset in load_config(config_path).presets)
 
 
 class TestFileShape:
     def test_기본값인_항목은_적지_않는다(self):
         """파일이 짧아야 손으로 열어봤을 때 읽힌다."""
         text = dump_config_text(make_config([AppEntry(name="A", path="a", type="url")]))
-        apps = yaml.safe_load(text)["apps"]
+        apps = yaml.safe_load(text)["presets"][0]["apps"]
         assert apps == [{"name": "A", "type": "url", "path": "a"}]   # args·delay·enabled 없음
 
     def test_기본값이_아닌_항목만_적는다(self):
         text = dump_config_text(make_config([
             AppEntry(name="A", path="a", type="exe", args=["x"], delay=2.0, enabled=False)]))
-        app = yaml.safe_load(text)["apps"][0]
+        app = yaml.safe_load(text)["presets"][0]["apps"][0]
         assert app["args"] == ["x"] and app["delay"] == 2.0 and app["enabled"] is False
 
     def test_주석이_사라진다는_경고가_파일에_남는다(self):
@@ -103,7 +116,8 @@ class TestFileShape:
             AppEntry(name="ㄴ둘째", path="b", type="url"),
             AppEntry(name="ㄱ첫째", path="a", type="url"),
         ]))
-        assert [a["name"] for a in yaml.safe_load(text)["apps"]] == ["ㄴ둘째", "ㄱ첫째"]
+        assert ([a["name"] for a in yaml.safe_load(text)["presets"][0]["apps"]]
+                == ["ㄴ둘째", "ㄱ첫째"])
 
 
 class TestBackup:
@@ -130,7 +144,7 @@ class TestWhereToSave:
         written = save_config(make_config([AppEntry(name="A", path="a", type="url")]))
 
         assert written == config_path
-        assert load_config(config_path).apps[0].name == "A"
+        assert saved_apps(load_config(config_path))[0].name == "A"
 
     def test_파일이_없으면_첫_후보_위치에_새로_만든다(self, config_path):
         assert not config_path.exists()
